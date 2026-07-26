@@ -1,0 +1,119 @@
+# HeteroBrain .gitignore
+
+# ============ 构建产物 ============
+build/
+build_*/
+out/
+[Bb]in/
+[Oo]bj/
+*.o
+*.obj
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# ============ CUDA / 编译缓存 ============
+*.cu.o
+*.fatbin
+*.cubin
+*.ptx
+nvcc_test/
+.cache/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+
+# ============ 模型权重（大文件，git-ignore）============
+models/*.gguf
+models/*.bin
+models/*.safetensors
+models/*.pt
+models/*.ckpt
+models/*.snn2e
+models/checkpoints/
+
+# ============ 训练数据（大文件）============
+data/*.txt
+data/*.json
+data/*.jsonl
+data/*.csv
+data/*.bin
+!data/README.md
+!data/.gitkeep
+
+# ============ 日志 / 临时文件 ============
+*.log
+*.out
+*.err
+logs/
+tmp/
+temp/
+*.swp
+*~
+
+# ============ IDE / 编辑器 ============
+.vscode/
+.idea/
+*.code-workspace
+.vs/
+*.user
+
+# ============ 操作系统 ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ Trae / Claude 工具产物 ============
+.trae/
+.claude/
+.specs/
+
+# ============ 性能 profile ============
+*.csv.prof
+*.nsys
+*.ncu
+*.qdrep
+*.nvprof
+
+# ============ 检查点 / 备份 ============
+checkpoints/
+*.ckpt
+*.backup
+*.bak
+
+# ============ docs/archive 历史大文件（不进 git）============
+docs/archive/data_logs/*.bin
+docs/archive/data_logs/*.csv
+docs/archive/data_logs/*.txt
+docs/archive/**/*.bin
+docs/archive/**/*.ckpt
+docs/archive/**/*.snn2e
+
+# ============ legacy 历史产物（已清理，保留代码）============
+legacy/**/build/
+legacy/**/nvcc_test/
+legacy/**/.cache/
+legacy/**/__pycache__/
+legacy/**/checkpoints/
+legacy/**/*.log
+legacy/**/*.pdb
+legacy/**/*.exe
+legacy/**/*.obj
+legacy/**/*.o

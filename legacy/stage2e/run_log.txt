@@ -1,0 +1,500 @@
+﻿============================================================
+  THE TRUE AI - Stage 2e Phase 1
+  快时间尺度: AdEx + NMDA + STP + 群体编码
+============================================================
+  设计文档: docs/superpowers/specs/2026-07-19-bio-mechanisms-design.md
+  神经元规模: 55000 (55K = 50K 联合皮层 + 5K 前额叶)
+  突触规模:   10700000 (10.7M)
+  柱数:       50 (柱内 sensory/assoc/motor 三层)
+  群体编码:   每柱 K=50 神经元, 增益 7.0
+  训练步数:   10000
+  显存预算:   1332 MB / 1500 MB (余量 168 MB)
+============================================================
+
+[P1] 使用 GPU: NVIDIA GeForce RTX 3060 Laptop GPU (6144 MB 显存, compute capability 8.6)
+
+RUN_METADATA_BEGIN
+RUN_PARAM program=snn_stage2e_p1
+RUN_PARAM build_date=Jul 23 2026
+RUN_PARAM build_time=21:33:57
+RUN_PARAM design_doc=docs/superpowers/specs/2026-07-19-bio-mechanisms-design.md
+RUN_PARAM total_steps=10000
+RUN_PARAM e0_mode=0
+RUN_PARAM csv_enabled=0
+RUN_PARAM csv_path=
+RUN_PARAM log_interval=1000
+RUN_PARAM checkpoint_interval=50000
+RUN_PARAM smoke_test_steps=10000
+RUN_PARAM gpu_name=NVIDIA GeForce RTX 3060 Laptop GPU
+RUN_PARAM gpu_total_mem_mb=6144
+RUN_PARAM gpu_compute_major=8
+RUN_PARAM gpu_compute_minor=6
+RUN_PARAM vram_budget_bytes=1572864000
+RUN_PARAM vram_peak_target_bytes=1396703232
+RUN_PARAM n_columns=50
+RUN_PARAM neurons_per_column=1000
+RUN_PARAM n_prefrontal_neurons=5000
+RUN_PARAM n_association_neurons=50000
+RUN_PARAM n_total_neurons=55000
+RUN_PARAM col_sensory_size=200
+RUN_PARAM col_association_size=600
+RUN_PARAM col_motor_size=200
+RUN_PARAM n_sensory_total=10000
+RUN_PARAM n_assoc_total=30000
+RUN_PARAM n_motor_total=10000
+RUN_PARAM synapses_per_neuron=200
+RUN_PARAM n_total_synapses=10700000
+RUN_PARAM excitatory_ratio=0.800000
+RUN_PARAM delay_steps_max=20
+RUN_PARAM delay_intra_min=1
+RUN_PARAM delay_intra_max=3
+RUN_PARAM delay_inter_min=5
+RUN_PARAM delay_inter_max=10
+RUN_PARAM delay_long_min=15
+RUN_PARAM delay_long_max=20
+RUN_PARAM delay_ring_slot_capacity=750000
+RUN_PARAM adex_c=281.000000
+RUN_PARAM adex_gl=30.000000
+RUN_PARAM adex_el=-70.599998
+RUN_PARAM adex_vt=-50.400002
+RUN_PARAM adex_delta_t=2.000000
+RUN_PARAM adex_vr=-70.599998
+RUN_PARAM adex_vpeak=20.000000
+RUN_PARAM adex_taum=9.366667
+RUN_PARAM adex_taum_inv=0.106762
+RUN_PARAM v_bio_offset=-70.000000
+RUN_PARAM v_bio_scale=50.000000
+RUN_PARAM nmda_mg_block_threshold=-0.400000
+RUN_PARAM nmda_ca_tau=50.000000
+RUN_PARAM nmda_conductance_max=0.050000
+RUN_PARAM nmda_mg_concentration=1.000000
+RUN_PARAM nmda_tau=150.000000
+RUN_PARAM nmda_g_max=0.500000
+RUN_PARAM ampa_tau=5.000000
+RUN_PARAM ampa_g_max=1.000000
+RUN_PARAM gaba_a_tau=10.000000
+RUN_PARAM gaba_a_g_max=1.000000
+RUN_PARAM gaba_b_tau=150.000000
+RUN_PARAM gaba_b_g_max=0.300000
+RUN_PARAM adex_a_adapt=4.000000
+RUN_PARAM adex_b_reset=0.080500
+RUN_PARAM adex_tau_w=144.000000
+RUN_PARAM adex_tau_w_inv=0.006944
+RUN_PARAM adex_v_thresh_norm=1.000000
+RUN_PARAM adex_v_reset_norm=0.000000
+RUN_PARAM adex_refractory_steps=2
+RUN_PARAM adex_theta_adapt_rate=0.001000
+RUN_PARAM adex_theta_decay=0.999000
+RUN_PARAM adex_theta_max=0.300000
+RUN_PARAM stp_u_se=0.200000
+RUN_PARAM stp_u_si=0.050000
+RUN_PARAM stp_tau_fac=200.000000
+RUN_PARAM stp_tau_rec=500.000000
+RUN_PARAM stp_tau_fac_inv=0.005000
+RUN_PARAM stp_tau_rec_inv=0.002000
+RUN_PARAM pop_coding_k_per_column=50
+RUN_PARAM pop_coding_gain=7.000000
+RUN_PARAM input_inject_interval=5
+RUN_PARAM input_text_corpus_len=256
+RUN_PARAM da_receptor_init_exc=0.500000
+RUN_PARAM da_receptor_init_inh=-0.300000
+RUN_PARAM ach_receptor_init=0.300000
+RUN_PARAM ne_receptor_init=0.300000
+RUN_PARAM ht5_receptor_init=0.300000
+RUN_PARAM stdp_x_pre_tau=20.000000
+RUN_PARAM stdp_x_post_tau=20.000000
+RUN_PARAM stdp_a_plus=0.030000
+RUN_PARAM stdp_a_minus=0.030000
+RUN_PARAM stdp_w_max=1.500000
+RUN_PARAM stdp_e1_tau=20.000000
+RUN_PARAM stdp_e2_tau=200.000000
+RUN_PARAM camkii_k1=0.800000
+RUN_PARAM camkii_k2=0.100000
+RUN_PARAM camkii_k3=0.500000
+RUN_PARAM camkii_k4=0.050000
+RUN_PARAM camkii_autophos_facil=0.300000
+RUN_PARAM camkii_autophos_consol=0.700000
+RUN_PARAM inhibitory_neuron_ratio=0.160000
+RUN_PARAM inhib_fs_ratio=0.500000
+RUN_PARAM inhib_lts_ratio=0.300000
+RUN_PARAM inhib_som_ratio=0.200000
+RUN_PARAM n_neuromodulators=4
+RUN_PARAM da_tau=100.000000
+RUN_PARAM ach_tau=200.000000
+RUN_PARAM ne_tau=150.000000
+RUN_PARAM ht5_tau=300.000000
+RUN_PARAM w_value_dim=200
+RUN_PARAM w_pred_dim=200
+RUN_PARAM td_gamma=0.900000
+RUN_PARAM eta_value=0.001000
+RUN_PARAM eta_pred=0.001000
+RUN_PARAM novelty_ema_beta=0.990000
+RUN_PARAM da_downgrade_threshold=5.000000
+RUN_PARAM hipp_index_size=50000
+RUN_PARAM pattern_dim=50
+RUN_PARAM hipp_replay_batch=200
+RUN_PARAM hipp_novelty_threshold=0.500000
+RUN_PARAM hipp_replay_decay=0.900000
+RUN_PARAM wm_slots=50
+RUN_PARAM wm_pattern_dim=50
+RUN_PARAM wm_decay_factor=0.995000
+RUN_PARAM wm_activation_threshold=0.300000
+RUN_PARAM prefrontal_groups=50
+RUN_PARAM neurons_per_pf_group=100
+RUN_PARAM coact_tracker_size=500000
+RUN_PARAM coact_k_sample=500
+RUN_PARAM coact_form_threshold=5
+RUN_PARAM coact_evict_steps=5000
+RUN_PARAM n_form_per_cycle=5000
+RUN_PARAM pca_snapshot_buffer=100
+RUN_PARAM pca_update_interval=100
+RUN_PARAM pca_retrain_interval=100000
+RUN_PARAM pca_anchor_refresh=10000
+RUN_PARAM pca_learning_rate=0.010000
+RUN_PARAM ca_snapshot_interval=10
+RUN_PARAM ca_history_len=10
+RUN_PARAM ca_history_max_active=100000
+RUN_PARAM dev_phase_embryo_end=5000
+RUN_PARAM dev_phase_synapto_end=200000
+RUN_PARAM dev_phase_critical_end=800000
+RUN_PARAM dev_phase_prune_end=1500000
+RUN_PARAM dev_phase_mature_end=3000000
+RUN_PARAM dev_total_steps=3000000
+RUN_PARAM checkpoint_phase2=200000
+RUN_PARAM checkpoint_phase3=800000
+RUN_PARAM checkpoint_phase4=1500000
+RUN_PARAM dev_phase_name=0:embryo
+RUN_PARAM dev_phase_growth_rate=0:0.000000
+RUN_PARAM dev_phase_prune_threshold=0:0.000000
+RUN_PARAM dev_phase_plasticity_gain=0:0.000000
+RUN_PARAM dev_phase_nmda_expression=0:0.000000
+RUN_PARAM dev_phase_ach_level=0:0.100000
+RUN_PARAM dev_phase_myeline_factor=0:1.000000
+RUN_PARAM dev_phase_end_step=0:5000
+RUN_PARAM dev_phase_name=1:synaptogenic
+RUN_PARAM dev_phase_growth_rate=1:0.010000
+RUN_PARAM dev_phase_prune_threshold=1:0.000000
+RUN_PARAM dev_phase_plasticity_gain=1:1.000000
+RUN_PARAM dev_phase_nmda_expression=1:0.800000
+RUN_PARAM dev_phase_ach_level=1:0.500000
+RUN_PARAM dev_phase_myeline_factor=1:1.000000
+RUN_PARAM dev_phase_end_step=1:200000
+RUN_PARAM dev_phase_name=2:critical
+RUN_PARAM dev_phase_growth_rate=2:0.000000
+RUN_PARAM dev_phase_prune_threshold=2:0.000000
+RUN_PARAM dev_phase_plasticity_gain=2:3.000000
+RUN_PARAM dev_phase_nmda_expression=2:1.000000
+RUN_PARAM dev_phase_ach_level=2:0.800000
+RUN_PARAM dev_phase_myeline_factor=2:1.200000
+RUN_PARAM dev_phase_end_step=2:800000
+RUN_PARAM dev_phase_name=3:pruning
+RUN_PARAM dev_phase_growth_rate=3:0.000000
+RUN_PARAM dev_phase_prune_threshold=3:0.050000
+RUN_PARAM dev_phase_plasticity_gain=3:1.000000
+RUN_PARAM dev_phase_nmda_expression=3:0.600000
+RUN_PARAM dev_phase_ach_level=3:0.300000
+RUN_PARAM dev_phase_myeline_factor=3:1.500000
+RUN_PARAM dev_phase_end_step=3:1500000
+RUN_PARAM dev_phase_name=4:mature
+RUN_PARAM dev_phase_growth_rate=4:0.000000
+RUN_PARAM dev_phase_prune_threshold=4:0.020000
+RUN_PARAM dev_phase_plasticity_gain=4:0.300000
+RUN_PARAM dev_phase_nmda_expression=4:0.400000
+RUN_PARAM dev_phase_ach_level=4:0.200000
+RUN_PARAM dev_phase_myeline_factor=4:2.000000
+RUN_PARAM dev_phase_end_step=4:3000000
+RUN_PARAM chi2_df=255
+RUN_PARAM chi2_p_threshold=0.050000
+RUN_PARAM chi2_critical=293.200000
+RUN_PARAM chi2_min_row_total=10
+RUN_PARAM chi2_pass_significant_min=500
+RUN_PARAM weight_stats_sample=100000
+RUN_PARAM weight_distribution_sample=10700000
+RUN_PARAM weight_histogram_edges=-1.5,-1.0,-0.5,-0.1,-0.01,0.01,0.1,0.5,1.0,1.2,1.4,1.5
+RUN_METADATA_END
+
+[Stage2e P0] 开始分配 GPU 显存...
+  Buffer                                  Count     Size      Bytes   Total MB
+  ------                                  -----     ----      -----   --------
+  [+]. d_neurons                             55000 × 56B =     2.94 MB (累计    2.94 MB)
+  [+]. d_spike_flags                         55000 ×  1B =     0.05 MB (累计    2.99 MB)
+  [+]. d_synapses                         10700000 × 80B =   816.35 MB (累计  819.33 MB)
+  [+]. d_csr_row_ptr                         55001 ×  4B =     0.21 MB (累计  819.54 MB)
+  [+]. d_csr_col_idx                      10700000 ×  4B =    40.82 MB (累计  860.36 MB)
+  [+]. d_weights_cache                    10700000 ×  4B =    40.82 MB (累计  901.18 MB)
+  [+]. d_eligibility                      10700000 ×  4B =    40.82 MB (累计  942.00 MB)
+  [+]. d_eligibility_slow                 10700000 ×  4B =    40.82 MB (累计  982.81 MB)
+  [+]. d_synapse_alpha (PSW)              10700000 ×  4B =    40.82 MB (累计 1023.63 MB)
+  [+]. d_synapse_beta (PSW)               10700000 ×  4B =    40.82 MB (累计 1064.45 MB)
+  [+]. d_pca_W (55K×50)                   2750000 ×  4B =    10.49 MB (累计 1074.94 MB)
+  [+]. d_ca_snapshot                      10700000 ×  4B =    40.82 MB (累计 1115.76 MB)
+  [+]. d_ca_history_sparse                 1000000 ×  4B =     3.81 MB (累计 1119.57 MB)
+  [+]. d_synapse_delay                    10700000 ×  1B =    10.20 MB (累计 1129.78 MB)
+  [+]. d_delay_ring_indices               15000000 ×  4B =    57.22 MB (累计 1187.00 MB)
+  [+]. d_delay_ring_current               15000000 ×  4B =    57.22 MB (累计 1244.22 MB)
+  [+]. d_stdp_x_pre_trace                 10700000 ×  4B =    40.82 MB (累计 1285.03 MB)
+  [+]. d_camkii_activity                  10700000 ×  4B =    40.82 MB (累计 1325.85 MB)
+  [+]. d_input_current                       55000 ×  4B =     0.21 MB (累计 1326.06 MB)
+  [+]. d_nmda_current                        55000 ×  4B =     0.21 MB (累计 1326.27 MB)
+  [+]. d_inhibitory_current                  55000 ×  4B =     0.21 MB (累计 1326.48 MB)
+  [+]. d_da_concentration                    55000 ×  4B =     0.21 MB (累计 1326.69 MB)
+  [+]. d_ach_concentration                   55000 ×  4B =     0.21 MB (累计 1326.90 MB)
+  [+]. d_ne_concentration                    55000 ×  4B =     0.21 MB (累计 1327.11 MB)
+  [+]. d_ht5_concentration                   55000 ×  4B =     0.21 MB (累计 1327.32 MB)
+  [+]. d_hippo_indices                       50000 × 256B =    12.21 MB (累计 1339.53 MB)
+  [+]. d_coact_trackers                     500000 × 16B =     7.63 MB (累计 1347.16 MB)
+  [+]. d_wm_slots                               50 × 216B =     0.01 MB (累计 1347.17 MB)
+  [+]. d_subcolumn_fr                          200 ×  4B =     0.00 MB (累计 1347.17 MB)
+  [+]. d_baseline_fr                           200 ×  4B =     0.00 MB (累计 1347.17 MB)
+  [+]. d_w_pred (200×200)                   40000 ×  4B =     0.15 MB (累计 1347.32 MB)
+  [+]. d_w_value                               200 ×  4B =     0.00 MB (累计 1347.32 MB)
+  [+]. d_pred_fr                               200 ×  4B =     0.00 MB (累计 1347.32 MB)
+  [+]. d_byte_histogram                        256 ×  4B =     0.00 MB (累计 1347.32 MB)
+  [+]. d_neuron_byte_counts (55K×256)    14080000 ×  4B =    53.71 MB (累计 1401.03 MB)
+  [+]. d_replay_injection                    55000 ×  4B =     0.21 MB (累计 1401.24 MB)
+  ------                                  -----     ----      -----   --------
+[Stage2e P0] 持久显存分配完成: 1401.24 MB (1.37 GB)
+[Stage2e P0] v4 设计目标: 1242 MB, 实际: 1401.24 MB, 偏差: +159.24 MB
+
+snn_stage2e_p1.exe : [Stage2e] 警告: 显存接近预算上限 (1401.24 MB / 1500.00 MB)
+At line:15 char:9809
++ ... les\@vscode\ripgrep\bin'; & ".\build\snn_stage2e_p1.exe" 2>&1 | Out-F ...
++                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([Stage2e] 警告: 显...B / 1500.00 MB):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+========== Stage 2e v4 显存预算报告 ==========
+  持久分配:       1401.24 MB
+  峰值 (含临时):  1401.24 MB
+  v4 预算目标:    1332 MB
+  1.5GB 上限:     OK
+  余量:           98.76 MB (6.6%)
+==============================================
+
+  GPU 总显存:     6.00 GB
+  GPU 可用显存:   3.62 GB
+  本进程占用:     2.38 GB (39.7%)
+
+[Stage2e P1] === 网络初始化 ===
+[Stage2e P1] 初始化神经元 (55K AdEx 静息)...
+[Stage2e P1] 初始化突触拓扑 + 延迟 + STP + 调质受体 + PSW...
+[Stage2e P1] 生成突触拓扑 (host 端, ~10.7M 突触)...
+[Stage2e P1] 实际生成: 10700000 突触, 55001 row_ptr 项\n[Stage2e P1] 突触拓扑已上传 GPU
+[Stage2e P1] 初始化缓冲为零...
+[Stage2e P1] 网络初始化完成\n[Stage2e P1] 调度器初始化完成
+
+[P1] 开始 10000 步快时间尺度测试...
+
+
+[Stage2e P1] ===== 发育阶段切换: EMBRYONIC (0-5K) (step 0) =====
+
+[Stage2e P3-C] step=0  silhouette=1.0000  js_mean=0.0272  js_max=0.6804  col_ratio=0.00  nz_cols=1/50  grand_total=1
+[Stage2e P1] step=     0  phase=EMBRYONIC     plast_gain=0.00  nmda_expr=0.00  vram=1401.2MB  spikes=1  ring=1  arrived=0  burst%=0.0
+[Stage2e P1] step=  1000  phase=EMBRYONIC     plast_gain=0.00  nmda_expr=0.00  vram=1401.2MB  spikes=87  ring=1  arrived=7780  burst%=6.1
+[Stage2e P1] step=  2000  phase=EMBRYONIC     plast_gain=0.00  nmda_expr=0.00  vram=1401.2MB  spikes=82  ring=1  arrived=8454  burst%=8.4
+[Stage2e P1] step=  3000  phase=EMBRYONIC     plast_gain=0.00  nmda_expr=0.00  vram=1401.2MB  spikes=72  ring=1  arrived=8032  burst%=9.6
+[Stage2e P1] step=  4000  phase=EMBRYONIC     plast_gain=0.00  nmda_expr=0.00  vram=1401.2MB  spikes=81  ring=1  arrived=9215  burst%=10.3
+
+[Stage2e P1] ===== 发育阶段切换: SYNAPTOGENIC (5K-200K) (step 5000) =====
+
+[Stage2e P1] step=  5000  phase=SYNAPTOGENIC  plast_gain=1.00  nmda_expr=0.80  vram=1401.2MB  spikes=75  ring=1  arrived=8734  burst%=10.9
+[Stage2e P1] step=  6000  phase=SYNAPTOGENIC  plast_gain=1.00  nmda_expr=0.80  vram=1401.2MB  spikes=77  ring=1  arrived=9035  burst%=11.4
+[Stage2e P1] step=  7000  phase=SYNAPTOGENIC  plast_gain=1.00  nmda_expr=0.80  vram=1401.2MB  spikes=72  ring=1  arrived=8878  burst%=11.8
+[Stage2e P1] step=  8000  phase=SYNAPTOGENIC  plast_gain=1.00  nmda_expr=0.80  vram=1401.2MB  spikes=84  ring=1  arrived=9556  burst%=12.0
+[Stage2e P1] step=  9000  phase=SYNAPTOGENIC  plast_gain=1.00  nmda_expr=0.80  vram=1401.2MB  spikes=72  ring=1  arrived=10336  burst%=12.3
+
+[P1] 测试完成
+
+
+========== Stage 2e v4 显存预算报告 ==========
+  持久分配:       1401.24 MB
+  峰值 (含临时):  1401.24 MB
+  v4 预算目标:    1332 MB
+  1.5GB 上限:     OK
+  余量:           98.76 MB (6.6%)
+==============================================
+
+  GPU 总显存:     6.00 GB
+  GPU 可用显存:   3.62 GB
+  本进程占用:     2.38 GB (39.7%)
+[P1] 累计统计:
+  总执行步数:        10000
+  累计脉冲:          616798
+  平均脉冲/步:       61.7
+  最小脉冲/步:       0
+  最大脉冲/步:       261
+  脉冲极差:          261
+  簇状发放步数:      1255 (12.55%)
+  单神经元burst脉冲: 11142
+  延迟事件到达:      117148696
+  延迟事件分发:      117171889
+  延迟事件丢弃:      0
+  最大槽位深度:      35433 / 750000
+  最终延迟队列位置:  0 / 20
+
+============================================================
+  P1 通过判据检查 (设计文档 §7.1)
+============================================================
+  [1] 编译通过:                       PASS
+  [2] 10000 步不崩:                      PASS
+  [3] 显存峰值 < 1332 MB:             FAIL (实际 1401 MB)
+  [4] 显存 < 1.5GB 上限:              PASS (93.4% 利用率)
+  [5] spike count 极差 > 100:         PASS (实际 261, min=0 max=261)
+  [6] 簇状发放出现 (burst% > 0.5%):    PASS (实际 12.55%)
+  [7] 发放活动正常 (avg > 10):        PASS (实际 61.7)
+  [8] 延迟事件链路有效:               PASS (到达 117148696, 分发 117171889, 丢弃 0)
+  [9] 单神经元burst出现:              PASS (实际 11142)
+  [10] 真实权重范围合法:              PASS (min -1.194 max 1.200 mean 0.617)
+  [10b] PSW 概率突触权重:            FAIL (α=0.0480 β=0.0512 ev=0.0993 conf=0.0903 mature=0.00%)
+       [PSW 保证: w_eff 物理上 ∈ (0, W_MAX), 不可能饱和; 初始 ev=0.1, mature_thresh=0.2]
+
+============================================================
+  权重分布深度分析 [FINAL] (sample=10700000)
+============================================================
+
+--- 全局统计 ---
+  mean=0.4376  std=0.6109  var=0.373183
+  p1=-0.9925  p5=-0.8757  p10=-0.7302  p25=0.4501  p50=0.6573  p75=0.8394  p90=0.9485  p95=0.9851  p99=1.1325
+  强突触 (|w|>1.0): 400828 (3.75%)
+  弱突触 (|w|<0.1): 0 (0.00%)
+  抑制性 (w<0):     2139930 (20.00%)
+  兴奋性 (w>0):     8560070 (80.00%)
+
+--- 权重直方图 ---
+  [-1.5,-1.0):    80179 ( 0.75%) |#
+  [-1.0,-0.5):  1793668 (16.76%) |#################################
+  [-0.5,-0.1):   266083 ( 2.49%) |####
+  [-0.1,-0.01):        0 ( 0.00%) |
+  [-0.01,0.01):        0 ( 0.00%) |
+  [0.01,0.1):        0 ( 0.00%) |
+  [0.1,0.5):  1068988 ( 9.99%) |###################
+  [0.5,1.0):  7170433 (67.01%) |##################################################
+  [1.0,1.2):   320628 ( 3.00%) |#####
+  [1.2,1.4):       21 ( 0.00%) |
+  [1.4,1.5]:        0 ( 0.00%) |
+
+--- 按突触后神经元分层统计 ---
+  Layer           Count     Mean      Std      Min      Max  Strong%    Weak%   Inhib%   Excit%
+  sensory       1950473   0.4336   0.6053  -1.2000   1.2158    2.58%    0.00%   20.01%   79.99%
+  association   5850824   0.4339   0.6050  -1.2065   1.2125    2.58%    0.00%   19.99%   80.01%
+  motor         1948705   0.4340   0.6050  -1.2005   1.2056    2.56%    0.00%   20.00%   80.00%
+  prefrontal     949998   0.4767   0.6665  -1.2000   1.2000   15.78%    0.00%   20.00%   80.00%
+============================================================
+
+--- P2 中时间尺度学习规则判据 ---
+  [11] CaMKII 活性 > 0:               PASS (nz=29059/100000, mean=0.000137, ca_nz=1000/1000, ca_mean=0.042201)
+  [12] eligibility trace 非零:        PASS (e1_nz=650, e2_nz=1650)
+  [13] 调质浓度范围 [0,2]:            PASS (DA=0.881 ACh=1.092 NE=0.103 5HT=0.353)
+  [14] 字节直方图方差 > 0:            PASS (var=6442.2, nz_bins=256, mean=631.1)
+  [15] DA 价值函数 V(s) 非零:         PASS (V(s)=0.0001, V(s')=0.0000)
+  [16] 卡方显著神经元分层分析 (df=255, 临界=293.2):
+       层级           显著   活跃    活跃% 卡方均值 卡方最大
+       sensory            1351     1351      13.5%     1820.9     2032.0
+       association        3994     3994      13.3%     1818.5     2032.0
+       motor              1299     1299      13.0%     1815.5     2032.0
+       prefrontal            0        0       0.0%        0.0        0.0
+  [16] 字节/输入响应卡方 > 500:      PASS (总显著=6644/6644 活跃, 均值=1818.4, 最大=2032.0)
+
+--- P3 网络动力学与语义涌现前置判据 ---
+[Stage2e P3-C] step=10000  silhouette=-0.0234  js_mean=0.1580  js_max=0.2040  col_ratio=1.21  nz_cols=50/50  grand_total=161559
+  [17] P3 稀疏竞争机制运行:          PASS (inhib_updates=1000, activity_drive=0.3350)
+  [18] P3-b k-WTA 柱内竞争:          PASS (updates=1000, active_cols=43/50, winners=80, suppressed=7, k=5)
+  [19] P3 工作记忆槽位激活:          PASS (wm_updates=100, active_slots=50/50, mean=0.6090, max=0.7281)
+  [20] 语义涌现准备度 >= 0.70:       PASS (score=1.00, P3-C silhouette/JS 见判据[21])
+  [21] P3-C 语义聚类评估:           PASS (updates=2, silhouette=-0.0234, js_mean=0.1580, js_max=0.2040, col_ratio=1.21)
+       [设计目标 800K: silhouette>0.15, js_mean>0.15, col_ratio>2.0]
+============================================================
+  FAIL: 语义涌现路径需继续调参
+============================================================
+
+FINAL_METRICS_BEGIN
+FINAL_METRIC pass=0
+FINAL_METRIC e0_mode=0
+FINAL_METRIC total_steps=10000
+FINAL_METRIC total_spikes=616798
+FINAL_METRIC avg_spikes_per_step=61.679798
+FINAL_METRIC min_spikes_per_step=0
+FINAL_METRIC max_spikes_per_step=261
+FINAL_METRIC spike_range=261
+FINAL_METRIC burst_steps=1255
+FINAL_METRIC burst_ratio=12.550000
+FINAL_METRIC single_neuron_burst_spikes=11142
+FINAL_METRIC arrived_events=117148696
+FINAL_METRIC dispatched_events=117171889
+FINAL_METRIC dropped_events=0
+FINAL_METRIC drop_rate=0.000000000
+FINAL_METRIC max_delay_slot_depth=35433
+FINAL_METRIC final_delay_ring_idx=0
+FINAL_METRIC vram_used_mb=1401.243237
+FINAL_METRIC vram_peak_mb=1401
+FINAL_METRIC weight_mean=0.617430389
+FINAL_METRIC weight_abs_mean=0.725775421
+FINAL_METRIC weight_min=-1.193874478
+FINAL_METRIC weight_max=1.199848413
+FINAL_METRIC camkii_nz=29059
+FINAL_METRIC camkii_mean=0.000137482
+FINAL_METRIC ca_nz_sample=1000
+FINAL_METRIC ca_mean_sample=0.042201418
+FINAL_METRIC eligibility_e1_nz=650
+FINAL_METRIC eligibility_e2_nz=1650
+FINAL_METRIC da_mean=0.881237209
+FINAL_METRIC ach_mean=1.092175245
+FINAL_METRIC ne_mean=0.102757417
+FINAL_METRIC ht5_mean=0.352772564
+FINAL_METRIC value_s=0.000065273
+FINAL_METRIC value_sp=0.000000000
+FINAL_METRIC byte_hist_var=6442.230209351
+FINAL_METRIC byte_hist_nz_bins=256
+FINAL_METRIC byte_hist_mean=631.089843750
+FINAL_METRIC chi2_significant=6644
+FINAL_METRIC chi2_active=6644
+FINAL_METRIC chi2_mean=1818.391828046
+FINAL_METRIC chi2_max=2032.000000000
+FINAL_METRIC p3_inhibitory_updates=1000
+FINAL_METRIC p3_kwta_updates=1000
+FINAL_METRIC p3_kwta_active_columns=43
+FINAL_METRIC p3_kwta_winner_estimate=80
+FINAL_METRIC p3_kwta_suppressed_estimate=7
+FINAL_METRIC p3_kwta_target_per_column=5
+FINAL_METRIC p3_wm_updates=100
+FINAL_METRIC p3_activity_drive=0.335033596
+FINAL_METRIC wm_active_slots=50
+FINAL_METRIC wm_mean_activation=0.609006405
+FINAL_METRIC wm_max_activation=0.728111744
+FINAL_METRIC semantic_readiness_score=1.000000000
+FINAL_METRIC semantic_emergence_level=1
+FINAL_METRIC p3_semantic_eval_updates=2
+FINAL_METRIC p3_semantic_eval_step=10000
+FINAL_METRIC p3_silhouette=-0.023445789
+FINAL_METRIC p3_js_divergence_mean=0.158013224
+FINAL_METRIC p3_js_divergence_max=0.204007788
+FINAL_METRIC p3_column_ratio=1.212079616
+FINAL_METRIC criterion_no_crash=1
+FINAL_METRIC criterion_vram_peak=0
+FINAL_METRIC criterion_vram_limit=1
+FINAL_METRIC criterion_spike_range=1
+FINAL_METRIC criterion_burst=1
+FINAL_METRIC criterion_active=1
+FINAL_METRIC criterion_delay=1
+FINAL_METRIC criterion_single_burst=1
+FINAL_METRIC criterion_weight_range=1
+FINAL_METRIC criterion_camkii=1
+FINAL_METRIC criterion_eligibility=1
+FINAL_METRIC criterion_modulatory_range=1
+FINAL_METRIC criterion_byte_hist_var=1
+FINAL_METRIC criterion_value=1
+FINAL_METRIC criterion_chi2=1
+FINAL_METRIC criterion_p3_inhibitory=1
+FINAL_METRIC criterion_p3_kwta=1
+FINAL_METRIC criterion_p3_wm=1
+FINAL_METRIC criterion_semantic_readiness=1
+FINAL_METRIC criterion_p3_semantic=1
+FINAL_METRIC criterion_psw=0
+FINAL_METRIC psw_mean_alpha=0.048046656
+FINAL_METRIC psw_mean_beta=0.051241919
+FINAL_METRIC psw_mean_evidence=0.099288575
+FINAL_METRIC psw_mean_confidence=0.090319425
+FINAL_METRIC psw_mature_ratio=0.000000000
+FINAL_METRICS_END
+[Stage2e P0] 释放 GPU 显存 (1401.24 MB)...
+[Stage2e P1] 调度器销毁, 共执行 10000 步, 累计脉冲 616798

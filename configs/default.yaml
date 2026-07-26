@@ -1,0 +1,64 @@
+# HeteroBrain 默认配置
+# ====================
+# 异构中文对话 AI 引擎运行配置
+
+engine:
+  name: "HeteroBrain v0.1"
+  mode: "interactive"           # interactive | batch | eval
+  device: "auto"                # auto | cpu | cuda
+
+# =============================================================================
+# LLM 子系统配置 (MiniCPM5-1B INT4 GGUF)
+# =============================================================================
+llm:
+  model_path: "models/minicpm5-1b-q4_k_m.gguf"
+  model_name: "MiniCPM5-1B"
+  quantization: "Q4_K_M"        # INT4 量化, 0.5GB
+  n_gpu_layers: 0               # 0=纯 CPU, -1=全部 GPU (需 CUDA build)
+  n_ctx: 4096                   # 上下文窗口
+  n_threads: 4                  # CPU 推理线程数
+  temperature: 0.7
+  top_p: 0.9
+  top_k: 40
+  repeat_penalty: 1.1
+  seed: 42
+
+# =============================================================================
+# SNN 子系统配置 (60K 神经元 / 10.7M 突触)
+# =============================================================================
+snn:
+  enabled: false                # Phase 2 启用
+  checkpoint: "models/snn_60k_v3.snn2e"
+  n_neurons: 60000
+  n_synapses: 10700000
+  n_columns: 50
+  bptt_window: 50
+  bptt_lr: 0.001
+  pca_dim: 256
+  memory_top_k: 5
+
+# =============================================================================
+# Bridge 转换层配置
+# =============================================================================
+bridge:
+  enabled: false                # Phase 3 启用
+  projection_matrix: "models/spike_to_embedding.pt"
+  projection_dim_in: 2048       # SNN PCA 签名维度
+  projection_dim_out: 1024      # LLM embedding 维度
+  truth_filter_threshold: 0.6   # spike 一致性阈值
+
+# =============================================================================
+# 在线学习 (Phase 5)
+# =============================================================================
+online_learning:
+  enabled: false
+  stddp_lr: 0.0001
+  memory_consolidation_interval: 100
+
+# =============================================================================
+# 日志
+# =============================================================================
+logging:
+  level: "info"                 # debug | info | warn | error
+  file: "logs/heterobrain.log"
+  console: true
