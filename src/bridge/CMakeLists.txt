@@ -19,24 +19,37 @@ set(BRIDGE_HEADERS
     pca_projection.h
 )
 
-if(BRIDGE_SRCS)
+set(BRIDGE_IMPLEMENTATION_READY TRUE)
+foreach(source_file IN LISTS BRIDGE_SRCS BRIDGE_HEADERS)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}")
+        set(BRIDGE_IMPLEMENTATION_READY FALSE)
+    endif()
+endforeach()
+
+if(BRIDGE_IMPLEMENTATION_READY)
     add_library(bridge_subsystem STATIC ${BRIDGE_SRCS} ${BRIDGE_HEADERS})
+    target_include_directories(bridge_subsystem
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/snn
+            ${CMAKE_SOURCE_DIR}/src/llm
+    )
+
+    target_link_libraries(bridge_subsystem
+        PUBLIC
+            llm_subsystem
+    )
 else()
-    add_library(bridge_subsystem STATIC INTERFACE)
+    add_library(bridge_subsystem INTERFACE)
+    target_include_directories(bridge_subsystem
+        INTERFACE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/src/snn
+            ${CMAKE_SOURCE_DIR}/src/llm
+    )
+    target_link_libraries(bridge_subsystem INTERFACE llm_subsystem)
+    message(STATUS "Bridge sources are incomplete; using interface target")
 endif()
-
-target_include_directories(bridge_subsystem
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/src/snn
-        ${CMAKE_SOURCE_DIR}/src/llm
-)
-
-target_link_libraries(bridge_subsystem
-    PUBLIC
-        snn_subsystem
-        llm_subsystem
-)
 
 # TODO: Phase 3 实现 —
 #   1. spike_embedding.cpp: 训练 [2048, 1024] 投影矩阵 (PyTorch 离线训练后导出权重)

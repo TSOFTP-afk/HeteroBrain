@@ -73,6 +73,21 @@
 - [ ] 三子系统联调
 - [ ] **里程碑**：SNN 检索注入后，多轮对话一致性显著提升
 
+### Phase 3A — ISA 动态协作路由
+
+**前置条件**：Phase 3 已有可测量的 LLM-only、向量检索和 SNN 检索链路。
+
+- [x] 定义 ISA 动态单源拓扑和工程边界
+- [x] 实现可复现的 `dynamic_router` 拓扑采样核心
+- [x] 增加无同行回退、单入边和拓扑重采样测试
+- [ ] 实现同步 Agent Orchestrator（snapshot → resample → update）
+- [ ] 实现图外确定性验收门
+- [ ] 记录每轮拓扑、概率、随机种子、成本和结果
+- [ ] 实现 ASA / LFSA / ISA 三组对照
+- [ ] **里程碑**：在质量不下降的前提下降低模型调用或 token 成本
+
+详细设计见 [`docs/isa-dynamic-routing-architecture.md`](isa-dynamic-routing-architecture.md)。
+
 ### Phase 4 — 评测与优化
 
 - [ ] 中文对话评测（CEval / CMMLU 子集 + 人工评测）

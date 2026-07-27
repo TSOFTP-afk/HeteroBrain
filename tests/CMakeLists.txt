@@ -1,0 +1,5 @@
+if(TARGET heterobrain_router)
+    add_executable(test_dynamic_router test_dynamic_router.cpp)
+    target_link_libraries(test_dynamic_router PRIVATE heterobrain_router)
+    add_test(NAME dynamic_router COMMAND test_dynamic_router)
+endif()

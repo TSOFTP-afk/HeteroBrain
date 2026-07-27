@@ -85,6 +85,17 @@ flowchart LR
     M1 -.->|真实性筛选 / 重排| G
 ```
 
+### ISA 动态协作扩展
+
+HeteroBrain 计划在 Bridge 打通后加入任务/场景级动态单源路由：每个 Agent
+在一轮中只接受 Story Director 或一个同行 Agent 的主要输入，并在下一次状态
+更新前重构有向拓扑。正典写入、外部发布和不可逆操作继续使用确定性验收门，
+不交给随机路由决定。
+
+当前仓库已加入可复现的 topology core 与单元测试；同步 Orchestrator 和端到端
+联调仍在路线图中。严格定义、与普通动态路由的区别及 ASA/LFSA/ISA 对照方案见
+[`docs/isa-dynamic-routing-architecture.md`](docs/isa-dynamic-routing-architecture.md)。
+
 ### 数据流
 
 1. **输入**：用户中文文本 → BPE 分词 → embedding

@@ -48,6 +48,29 @@ bridge:
   truth_filter_threshold: 0.6   # spike 一致性阈值
 
 # =============================================================================
+# ISA 动态协作路由
+# =============================================================================
+routing:
+  enabled: false                # Bridge/Orchestrator 完成后启用
+  mode: "isa"                   # asa | lfsa | isa
+  granularity: "task"           # task | scene | paragraph
+  topology_update_interval: 1   # 一次状态更新对应一次拓扑重构 (T=1)
+  controller_probability: 0.35  # alpha；peer 概率 gamma=1-alpha
+  seed: 42                      # 评测必须固定并记录
+
+  peer_scoring:                 # ISA 选中 peer 分支后的工程扩展
+    relevance_weight: 1.0
+    reliability_weight: 1.0
+    freshness_weight: 0.25
+    cost_weight: 0.25
+    temperature: 0.75
+
+  deterministic_gates:
+    canon_write: true
+    external_publish: true
+    irreversible_action: true
+
+# =============================================================================
 # 在线学习 (Phase 5)
 # =============================================================================
 online_learning:

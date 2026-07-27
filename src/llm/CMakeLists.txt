@@ -19,18 +19,30 @@ set(LLM_HEADERS
     prompt_builder.h
 )
 
-# Phase 1 占位: 暂无源文件, 用空 target 保持 CMake 结构
-if(LLM_SRCS)
-    add_library(llm_subsystem STATIC ${LLM_SRCS} ${LLM_HEADERS})
-else()
-    add_library(llm_subsystem STATIC INTERFACE)
-endif()
+# Phase 1 占位: 只有全部源文件存在时才创建静态库。
+set(LLM_IMPLEMENTATION_READY TRUE)
+foreach(source_file IN LISTS LLM_SRCS LLM_HEADERS)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}")
+        set(LLM_IMPLEMENTATION_READY FALSE)
+    endif()
+endforeach()
 
-target_include_directories(llm_subsystem
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/third_party
-)
+if(LLM_IMPLEMENTATION_READY)
+    add_library(llm_subsystem STATIC ${LLM_SRCS} ${LLM_HEADERS})
+    target_include_directories(llm_subsystem
+        PUBLIC
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/third_party
+    )
+else()
+    add_library(llm_subsystem INTERFACE)
+    target_include_directories(llm_subsystem
+        INTERFACE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/third_party
+    )
+    message(STATUS "LLM embedded sources are incomplete; using interface target")
+endif()
 
 # TODO: Phase 1 实现 —
 #   1. 引入 llama.cpp 作为 third_party/llama.cpp 子模块

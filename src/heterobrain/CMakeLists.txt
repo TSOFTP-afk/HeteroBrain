@@ -7,6 +7,15 @@
 #   main    - CLI 入口 (--interactive / --batch / --eval)
 # =============================================================================
 
+add_library(heterobrain_router STATIC
+    dynamic_router.cpp
+    dynamic_router.h
+)
+target_include_directories(heterobrain_router
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 set(ENGINE_SRCS
     engine.cpp
     config.cpp
@@ -18,24 +27,36 @@ set(ENGINE_HEADERS
     config.h
 )
 
-add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS})
+set(HETEROBRAIN_ENGINE_READY TRUE)
+foreach(source_file IN LISTS ENGINE_SRCS ENGINE_HEADERS)
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${source_file}")
+        set(HETEROBRAIN_ENGINE_READY FALSE)
+    endif()
+endforeach()
 
-target_link_libraries(heterobrain_engine
-    PRIVATE
-        snn_subsystem
-        llm_subsystem
-        bridge_subsystem
-)
+if(HETEROBRAIN_ENGINE_READY)
+    add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS})
 
-target_include_directories(heterobrain_engine
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-)
+    target_link_libraries(heterobrain_engine
+        PRIVATE
+            heterobrain_router
+            snn_subsystem
+            llm_subsystem
+            bridge_subsystem
+    )
 
-# 安装
-install(TARGETS heterobrain_engine
-    RUNTIME DESTINATION bin
-)
+    target_include_directories(heterobrain_engine
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    install(TARGETS heterobrain_engine
+        RUNTIME DESTINATION bin
+    )
+else()
+    message(STATUS
+        "HeteroBrain engine sources are incomplete; building router core only")
+endif()
 
 # TODO: Phase 1 实现 main.cpp 的最小骨架:
 #   1. 解析命令行: --llm <gguf> --config <yaml> --interactive

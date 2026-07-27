@@ -86,9 +86,11 @@ endif()
 # =============================================================================
 # 安装
 # =============================================================================
-install(TARGETS heterobrain_engine
-    RUNTIME DESTINATION bin
-)
+if(TARGET heterobrain_engine)
+    install(TARGETS heterobrain_engine
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 install(DIRECTORY configs/
     DESTINATION etc/heterobrain
