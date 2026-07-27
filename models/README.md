@@ -6,7 +6,7 @@
 
 | 文件 | 大小 | 来源 | 用途 |
 |---|---|---|---|
-| `minicpm5-1b-q4_k_m.gguf` | ~0.5GB | [ModelScope](https://modelscope.cn/models/OpenBMB/MiniCPM5-1B-GGUF) / HuggingFace | LLM 子系统 |
+| `MiniCPM5-1B-Q4_K_M.gguf` | ~656MB | [ModelScope](https://modelscope.cn/models/OpenBMB/MiniCPM5-1B-GGUF) / HuggingFace | LLM 子系统 |
 | `snn_60k_v3.snn2e` | ~32MB | 从 legacy/stage2e 训练产物复制 | SNN 子系统 (Phase 2) |
 | `spike_to_embedding.pt` | ~8MB | PyTorch 离线训练 (Phase 3) | Bridge 转换层 |
 

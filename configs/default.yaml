@@ -11,9 +11,9 @@ engine:
 # LLM 子系统配置 (MiniCPM5-1B INT4 GGUF)
 # =============================================================================
 llm:
-  model_path: "models/minicpm5-1b-q4_k_m.gguf"
+  model_path: "models/MiniCPM5-1B-Q4_K_M.gguf"
   model_name: "MiniCPM5-1B"
-  quantization: "Q4_K_M"        # INT4 量化, 0.5GB
+  quantization: "Q4_K_M"        # INT4 量化, ~656MB
   n_gpu_layers: 0               # 0=纯 CPU, -1=全部 GPU (需 CUDA build)
   n_ctx: 4096                   # 上下文窗口
   n_threads: 4                  # CPU 推理线程数

@@ -105,6 +105,12 @@ docs/archive/data_logs/*.txt
 docs/archive/**/*.bin
 docs/archive/**/*.ckpt
 docs/archive/**/*.snn2e
+# SDK / 编译器头文件快照（与项目代码无关，可重装获取）
+docs/archive/tools/
+
+# ============ 第三方源码压缩包（大文件，不入库）============
+llama.cpp-master.zip
+*.master.zip
 
 # ============ legacy 历史产物（已清理，保留代码）============
 legacy/**/build/

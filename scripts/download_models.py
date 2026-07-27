@@ -12,14 +12,14 @@ from pathlib import Path
 
 MODELS = {
     "minicpm5-1b-int4": {
-        "url": "https://modelscope.cn/api/v1/models/OpenBMB/MiniCPM5-1B-GGUF/repo?Revision=master&FilePath=minicpm5-1b-q4_k_m.gguf",
-        "filename": "minicpm5-1b-q4_k_m.gguf",
-        "size_gb": 0.5,
-        "description": "MiniCPM5-1B INT4 量化版本 (Q4_K_M), 0.5GB, AA-Index 小模型第一",
+        "url": "https://modelscope.cn/api/v1/models/OpenBMB/MiniCPM5-1B-GGUF/repo?Revision=master&FilePath=MiniCPM5-1B-Q4_K_M.gguf",
+        "filename": "MiniCPM5-1B-Q4_K_M.gguf",
+        "size_gb": 0.65,
+        "description": "MiniCPM5-1B INT4 量化版本 (Q4_K_M), ~656MB, AA-Index 小模型第一",
     },
     "qwen3-0.6b-int4": {
-        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-0.6B-GGUF/repo?Revision=master&FilePath=qwen3-0.6b-q4_k_m.gguf",
-        "filename": "qwen3-0.6b-q4_k_m.gguf",
+        "url": "https://modelscope.cn/api/v1/models/Qwen/Qwen3-0.6B-GGUF/repo?Revision=master&FilePath=Qwen3-0.6B-Q4_K_M.gguf",
+        "filename": "Qwen3-0.6B-Q4_K_M.gguf",
         "size_gb": 0.4,
         "description": "Qwen3-0.6B INT4 替代方案, 0.4GB, 双模式 (思考/非思考)",
     },
