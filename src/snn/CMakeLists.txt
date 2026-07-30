@@ -54,6 +54,7 @@ set(SNN_TRAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_allocator.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/input_encoding.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/run_config.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/event_scheduler.cpp
 )
 
 # snn_decoder: 独立解码评估工具 (host-only, decoder.cu 实为 host 代码, 强制 CXX 编译)
@@ -88,6 +89,23 @@ else()
     target_compile_options(snn_train PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wno-unused-parameter>
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-Wall,-Wextra,-Wno-unused-parameter>
+    )
+endif()
+
+# =============================================================================
+# Phase 3a-C1: EventScheduler 单元测试 (无 CUDA 依赖, 纯 host 逻辑)
+# test_event_scheduler.cpp 提供 set_event_signal stub, 不链接 modulatory_kernels.cu
+# =============================================================================
+add_executable(test_event_scheduler
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_event_scheduler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/event_scheduler.cpp
+)
+target_include_directories(test_event_scheduler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(MSVC)
+    target_compile_options(test_event_scheduler PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4244>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4267>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4305>
     )
 endif()
 
