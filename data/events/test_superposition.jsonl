@@ -1,0 +1,4 @@
+{"step_target": 500, "event_type": "food_tasty", "modifiers": {"publicity": "private", "authority": "self", "temporal": "momentary"}, "intensity": 35, "duration_s": 0, "description": "[叠加测试A] 美食 (DA↑↑)"}
+{"step_target": 500, "event_type": "criticism", "modifiers": {"publicity": "public", "authority": "peer", "temporal": "momentary"}, "intensity": -20, "duration_s": 0, "description": "[叠加测试B] 批评 (5HT↑+DA↓, 与A的DA拮抗)"}
+{"step_target": 500, "event_type": "social_bond", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": 30, "duration_s": 0, "description": "[叠加测试C] 社交联结 (Oxy↑, 放大DA)"}
+{"step_target": 1500, "event_type": "food_tasty", "modifiers": {"publicity": "private", "authority": "self", "temporal": "momentary"}, "intensity": 40, "duration_s": 0, "description": "[单事件对照] 美食 (DA↑↑, 与叠加对比)"}
