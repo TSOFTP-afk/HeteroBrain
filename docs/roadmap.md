@@ -43,7 +43,7 @@
 
 ### Phase 2 — SNN 训练子系统移植 ✅
 
-**目标**：将 `legacy/stage2e/` 的 SNN 训练子系统整体移植到新路径 `src/snn/`，作为 Phase 3 T2H 蒸馏的前置依赖。
+**目标**：将 `legacy/stage2e/` 的 SNN 训练子系统整体移植到新路径 `src/snn/`，作为 Phase 3 认知调度核心的前置依赖。
 
 **实际实现**（2026-07-27 完成）：
 
@@ -60,18 +60,23 @@
 - [x] **Checkpoint 验证**：v3 格式，`--resume` 从 step 4000 恢复，loss 完全匹配（误差 0%）
 - [x] Spec 文档：[.trae/specs/port-snn-training-subsystem/](file:///f:/thetrueai/.trae/specs/port-snn-training-subsystem/spec.md)
 
-**注**：原计划的 `memory_index.cu` / `online_stdp.cu` 检索接口推迟到 Phase 3 T2H 蒸馏时实现，因为 SNN 的检索能力需要先有 LLM embedding 对接才能定义 Top-K 语义。
+**注**：原计划的 `memory_index.cu` / `online_stdp.cu` 检索接口推迟到 Phase 3 时实现，因为 SNN 的检索能力需要先有 LLM embedding 对接才能定义 Top-K 语义。
 
-### Phase 3 — Bridge 转换层
+### Phase 3 — SNN 认知调度核心（情感核心 + 认知工作空间 + 工具编排）
 
-**目标**：SNN 检索结果影响 LLM 生成质量。
+**目标**：SNN 从"6 分类头逻辑处理器"重构为"前额叶认知调度器"，复用现有 31 种生物机制中 20+ 种。
+**方向文档（已归档）**：[docs/archive/snn-emotion-and-workspace-direction.md](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md)
+**训练范式权威契约**：[docs/developmental-training-master-spec.md](file:///f:/thetrueai/docs/developmental-training-master-spec.md)
 
-- [ ] PyTorch 离线训练 `[2048, 1024]` spike → embedding 投影矩阵
-- [ ] 实现 `src/bridge/spike_embedding.cpp`：spike → embedding
-- [ ] 实现 `src/bridge/truth_filter.cpp`：token 真实性筛选
-- [ ] 实现 `src/bridge/pca_projection.cpp`：LLM embedding ↔ SNN PCA
-- [ ] 三子系统联调
-- [ ] **里程碑**：SNN 检索注入后，多轮对话一致性显著提升
+- [~] **3a 情感核心**（进行中）：6 维调质向量（DA/5HT/NE/ACh/GABA/催产素）✅ + AffectiveState readout ✅ + synapse 6 维 M_ij 门控 ✅ + 250 步合成输入验证 ✅ + 稳态补偿 ✅；待做：真实文字训练验证 + LLM 调制接口接入 + **事件驱动调质注入接口**（当前情绪无语义锚点，§3.4）
+- [ ] **3b 认知黑板**：256 槽 BlackboardSlot + 读写头（替代原 50 槽 WM）+ 类型标签（FACT/CONCEPT/RELATION/GOAL/HYPOTHESIS/SCRATCH/ANCHOR）+ **事件驱动调质注入**（launch_modulatory 加 inject_event + 基因硬编码映射表，与黑板一并实现避免重复改接口，§3.4）
+- [ ] **3c 黑板-LLM 桥接**：embedding 双向（bge-small-zh 512 维）+ 导出 prompt
+- [ ] **3d 工具编排核心**：6 工具集（Transformer 生成器/计算器/草稿记录器/长程检索器/知识库查询/时钟）+ 状态驱动调用信号 + 黑板联动
+- [ ] **3e 工具调用训练**：模仿学习冷启动 + RL 微调（复用现有 DA 价值函数 + PSW 贝叶斯突触做 reward 闭环）
+  - 注：DA 信号当前来自内部 TD error，事件驱动注入后 DA 将叠加外部事件奖赏（如 hunt_success→DA↑，§3.4）
+- [ ] **3f 黑板-海马溢出**：短期→长期固化 + 情感印记（HippoIndex 加 emotion_tag/user_id/real_timestamp 字段）
+- [ ] **3g 端到端验证**：情感轨迹可视化 + 多步推理 demo + 工具调用流
+- [ ] **里程碑**：SNN 在跨轮次情感维持 + 多步推理 + 工具调度上展现出 LLM+RAG 做不到的能力
 
 ### Phase 4 — 评测与优化
 

@@ -1,7 +1,7 @@
 # 发育式训练综合规范（Master Spec）
 
 > **创建**：2026-07-30
-> **最后更新**：2026-07-31（新增 Phase 3a-C2 事件叠加修复 + 非线性调质交互）
+> **最后更新**：2026-07-31（文档统一归档 + Phase 3a-C2 事件叠加修复 + 非线性调质交互）
 > **状态**：权威文档（Superseding Document）
 > **范围**：Phase 3a-D2 启蒙期 + Phase 3a-D3 课程训练 + Phase 3a-D4 成年交付 + Phase 3a-D5 个性化 + Phase 3a-C2 事件叠加
 > **目的**：整合前序所有方案讨论，统一训练范式，**标记废弃内容**，作为后续编码的唯一契约
@@ -10,14 +10,44 @@
 
 ## 0. 文档权威声明
 
+### 0.1 文档关系图
+
+```
+┌─────────────────────────── 活文档（docs/ 根目录）───────────────────────────┐
+│                                                                              │
+│  developmental-training-master-spec.md   ← 本文件（训练范式权威契约）          │
+│       │                                                                      │
+│       │ 引用 Phase 3 子阶段命名                                              │
+│       ↓                                                                      │
+│  roadmap.md                             ← 项目阶段路线图                      │
+│                                                                              │
+│  PROJECT_MEMORY.md  (在仓库根目录)       ← 项目自带记忆（硬约束 + 阶段索引）   │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+                              │ 冲突时以本文件为准
+                              ↓
+┌─────────────────────────── 归档文档（docs/archive/）─────────────────────────┐
+│                                                                              │
+│  archive/phase3-t2h-distillation-plan.md        ← 废弃方案 A（T2H 蒸馏）       │
+│  archive/snn-emotion-and-workspace-direction.md ← 方向讨论推演记录            │
+│  archive/superpowers/specs/                     ← 设计草稿（已归档）          │
+│  archive/superpowers/plans/                     ← 实施计划（已归档）          │
+│  archive/migration/                             ← 项目迁移文档              │
+│  archive/*.md                                   ← 早期分析报告（Stage 2）     │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 0.2 取代声明
+
 本文件取代以下文档的训练范式部分，冲突时以本文件为准：
 
 | 文档 | 处理方式 |
 |---|---|
-| [phase3-t2h-distillation-plan.md](./phase3-t2h-distillation-plan.md) | **整体废弃**（见 §1.1 废弃标记） |
-| [snn-emotion-and-workspace-direction.md](./snn-emotion-and-workspace-direction.md) | 方向保留，训练范式部分以本文件为准 |
-| [superpowers/specs/2026-07-30-developmental-cognitive-training-design.md](./superpowers/specs/2026-07-30-developmental-cognitive-training-design.md) | **整体废弃**（旧版事件链方案） |
-| [superpowers/specs/2026-07-30-embodied-developmental-training-design.md](./superpowers/specs/2026-07-30-embodied-developmental-training-design.md) | 具身闭环架构保留，训练阶段划分以本文件为准 |
+| [archive/phase3-t2h-distillation-plan.md](./archive/phase3-t2h-distillation-plan.md) | **整体废弃**（见 §1.1 废弃标记） |
+| [archive/snn-emotion-and-workspace-direction.md](./archive/snn-emotion-and-workspace-direction.md) | 方向推演记录保留，训练范式部分以本文件为准 |
+| [archive/superpowers/specs/2026-07-30-developmental-cognitive-training-design.md](./archive/superpowers/specs/2026-07-30-developmental-cognitive-training-design.md) | **整体废弃**（旧版事件链方案） |
+| [archive/superpowers/specs/2026-07-30-embodied-developmental-training-design.md](./archive/superpowers/specs/2026-07-30-embodied-developmental-training-design.md) | 具身闭环架构保留，训练阶段划分以本文件为准 |
 | [roadmap.md](./roadmap.md) Phase 3a-D 部分 | 阶段命名以本文件为准 |
 
 ---
@@ -77,14 +107,14 @@
 
 ### 1.5 ⚠️ 废弃方案 E：旧版事件链发育训练
 
-**废弃文件**：`superpowers/specs/2026-07-30-developmental-cognitive-training-design.md`
+**废弃文件**：[archive/superpowers/specs/2026-07-30-developmental-cognitive-training-design.md](./archive/superpowers/specs/2026-07-30-developmental-cognitive-training-design.md)
 **废弃时间**：2026-07-30（被具身发育方案取代）
 **废弃原因**：
 1. 事件是"无根标签"，SNN 不知道"食物"是什么
 2. 因果链是模板硬编码的，不是 SNN 学到的预测结构
 3. 缺少身体、感知、行动、因果四要素
 
-**取代方案**：具身发育训练（`superpowers/specs/2026-07-30-embodied-developmental-training-design.md` 保留），并在本文件中升级为三阶段课程训练
+**取代方案**：具身发育训练（[archive/superpowers/specs/2026-07-30-embodied-developmental-training-design.md](./archive/superpowers/specs/2026-07-30-embodied-developmental-training-design.md) 保留），并在本文件中升级为三阶段课程训练
 
 ---
 
@@ -113,7 +143,7 @@
                     [LLM + RAG 外部能力]
 ```
 
-详细架构定义见 [snn-emotion-and-workspace-direction.md](./snn-emotion-and-workspace-direction.md)，本文件不重复。
+详细架构定义见 [archive/snn-emotion-and-workspace-direction.md](./archive/snn-emotion-and-workspace-direction.md)，本文件不重复。
 
 ### 2.2 训练分层（新增）
 

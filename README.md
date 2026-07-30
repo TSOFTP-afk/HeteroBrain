@@ -1,7 +1,11 @@
 # HeteroBrain — 异构中文对话 AI 引擎
 
-> **SNN × LLM 异构架构**：用脉冲神经网络做长程记忆与真实性筛选，用小型中文 LLM 做精致文本生成。
+> **SNN × LLM 异构架构**：SNN 作为前额叶认知调度器（情感核心 + 认知工作空间 + 工具编排），
+> LLM 作为语言生成与知识库。让 SNN 做它不可替代的事——维持跨轮次时序状态、STDP 在线学习、多时间尺度并行。
 > 边缘可部署 · 中文原生 · 在线持续学习 · 无云端依赖
+
+> **Phase 3 方向**（2026-07-30 更新）：SNN 定位从"6 分类头逻辑处理器"重构为"前额叶认知调度器"三层架构。
+> 详见 [docs/archive/snn-emotion-and-workspace-direction.md](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md)。
 
 ---
 
@@ -11,9 +15,9 @@ HeteroBrain 不是又一个 Transformer 大模型，也不是纯 SNN 研究项�
 
 | 模块 | 职责 | 实现 |
 |---|---|---|
-| **LLM 子系统** | 中文指令遵循、文本生成、知识检索 | MiniCPM5-1B（INT4 GGUF, 0.5GB）+ llama.cpp |
-| **SNN 子系统** | 长程模糊记忆、token 真实性筛选、在线 STDP 微调 | 自研 CUDA SNN（60K 神经元 / 10.7M 突触 / BPTT 代理梯度） |
-| **Bridge 转换层** | spike pattern ↔ embedding 投影、上下文注入 | [2048,1024] Linear + PCA 签名匹配 |
+| **LLM 子系统** | 中文指令遵循、文本生成、知识检索（RAG） | MiniCPM5-1B（INT4 GGUF, 0.5GB）+ llama.cpp + FAISS + bge-small-zh |
+| **SNN 子系统** | **前额叶认知调度器**：情感核心（6 维调质 + 事件驱动注入，[§3.4](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md#L148)）+ 认知工作空间（256 槽黑板）+ 工具编排（6 工具 + RL） | 自研 CUDA SNN（60K 神经元 / 10.7M 突触 / 31 种生物机制） |
+| **Bridge 转换层** | spike signature ↔ LLM embedding 双向桥接、神经调制信号注入 | PCA 签名 + bge-small-zh embedding + 读写头 |
 
 **设计原则**：
 - 不与万亿参数模型卷规模，攻击 Transformer 在**长序列、流式推理、边缘部署、持续学习**上的弱项
@@ -46,27 +50,27 @@ HeteroBrain 接受这个边界，把 SNN 降级为异构架构中的**记忆与�
 ## 系统架构
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph Input
         U[用户中文输入]
     end
 
     subgraph Bridge[转换层 Bridge]
         T[BPE Tokenizer]
-        E[Embedding 提取]
-        P[PCA 签名投影]
+        E[Embedding 提取<br/>bge-small-zh 512维]
+        P[PCA 签名投影<br/>50维]
     end
 
-    subgraph SNN[SNN 子系统 CUDA]
-        M1[60K 神经元记忆网络]
-        M2[BPTT 代理梯度训练器]
-        M3[丘脑门控 + 柱状拓扑]
-        R[(长程记忆库<br/>PCA 签名索引)]
+    subgraph SNN[SNN 认知调度核心 CUDA 60K神经元]
+        L1[Layer 1 情感核心<br/>6维调质 DA/5HT/NE/ACh/GABA/催产素<br/>PAD情感模型 + LLM调制信号<br/>事件→基因映射→调质 §3.4]
+        L2[Layer 2 认知黑板<br/>256槽 BlackboardSlot<br/>读写头 FACT/CONCEPT/GOAL/...]
+        L3[Layer 3 工具编排<br/>6工具 + 状态驱动调用信号<br/>DA reward RL训练]
+        R[(海马索引<br/>50K模式 PCA签名)]
     end
 
     subgraph LLM[LLM 子系统]
         G[MiniCPM5-1B INT4 GGUF]
-        K[(知识库 RAG)]
+        K[(知识库 RAG<br/>FAISS)]
     end
 
     subgraph Output
@@ -74,24 +78,26 @@ flowchart LR
     end
 
     U --> T --> E
-    E --> P --> M1
-    M1 <--> M2
-    M1 <--> M3
-    M1 --> R
-    R -->|Top-K 检索| G
-    E -->|token embedding| G
+    E --> P --> L2
+    L1 -->|temperature/empathy 调制| G
+    L2 -->|黑板内容导出 prompt| G
+    L3 -->|工具调用信号| G
+    L1 <--> L2 <--> L3
+    L2 --> R
     G <--> K
     G --> O
-    M1 -.->|真实性筛选 / 重排| G
+    O -.->|用户反馈事件 离散<br/>→事件→调质映射 §3.4| L1
 ```
 
 ### 数据流
 
-1. **输入**：用户中文文本 → BPE 分词 → embedding
-2. **SNN 检索**：embedding 投影到 PCA 签名空间 → 在 SNN 长程记忆库中检索 Top-K 相关片段
-3. **LLM 生成**：MiniCPM5-1B 接收 (当前输入 + SNN 检索的上下文 + RAG 知识) → 生成候选响应
-4. **真实性筛选**：SNN 对 LLM 生成的 token 序列做 spike 一致性校验，过滤"幻觉"token
-5. **在线学习**：用户反馈写入 SNN，触发局部 STDP 更新（不修改 LLM 权重）
+1. **输入**：用户中文文本 → BPE 分词 → embedding → 写入 SNN 认知黑板
+2. **SNN 状态演化**：跨轮次维持 6 维调质状态（DA/5HT/NE/ACh/GABA/催产素），演化情感轨迹。调质信号由外部事件 + 内部认知状态共同驱动（§3.4）
+3. **工具调用决策**：SNN 从内部状态 readout 工具调用信号（连续注意力，非 argmax），决定是否调用工具及调用哪个。注：内部状态含事件驱动注入产生的情绪背景（§3.4），非仅 spike 统计
+4. **LLM 生成**：MiniCPM5-1B 接收 (用户输入 + 黑板内容 + RAG 知识 + SNN 神经调制参数) → 生成响应
+5. **结果写回黑板**：工具结果 / LLM 输出 / 用户反馈写入黑板槽位，带情感印记 + 时间戳
+6. **DA reward 闭环**：用户反馈 → DA 价值函数 → TD error 驱动 STDP，强化工具调用策略。注：当前 DA 仅来自内部 TD error；事件驱动注入后 DA 将叠加外部事件奖赏（§3.4）
+7. **离线巩固**：睡眠重放期把黑板 HYPOTHESIS/GOAL 固化到海马长期记忆 + 突触权重
 
 ---
 
@@ -107,10 +113,14 @@ HeteroBrain/
 │
 ├── src/
 │   ├── snn/                          # SNN 子系统（C++/CUDA）
-│   │   ├── bptt_trainer.cu/.cuh      # 从 legacy/stage2e 移植
-│   │   ├── pca_signatures.cu/.cuh    # PCA 签名提取
-│   │   ├── memory_index.cu/.cuh      # 长程记忆索引（FAISS-like）
-│   │   └── online_stdp.cu/.cuh       # 在线 STDP 微调
+│   │   ├── bptt_trainer.cu/.cuh      # BPTT 代理梯度训练器
+│   │   ├── modulatory_kernels.cu/.cuh # 6 维调质系统 + AffectiveState readout
+│   │   ├── synapse_kernels.cu/.cuh   # STDP + 6 维调质门控 M_ij
+│   │   ├── pca_kernels.cu/.cuh       # PCA 签名提取（50 维）
+│   │   ├── hippocampal_kernels.cu/.cuh # 海马索引（50K 模式）
+│   │   ├── wm_kernels.cu/.cuh        # 工作记忆（50 槽，Phase 3b 替换为 256 槽黑板）
+│   │   ├── scheduler.cu/.cuh         # 生物机制调度器（31 种机制）
+│   │   └── decoder.cu/.cuh           # 256 类字节解码器
 │   │
 │   ├── llm/                          # LLM 子系统（C++ + llama.cpp）
 │   │   ├── llama_runner.cpp/.h       # llama.cpp 推理封装
@@ -156,9 +166,13 @@ HeteroBrain/
 │   └── test_e2e_dialogue.py
 │
 └── docs/                             # 文档
-    ├── architecture.md               # 详细架构（待写）
+    ├── developmental-training-master-spec.md  # 训练范式权威契约
     ├── roadmap.md                    # 路线图
-    └── migration_from_legacy.md      # 从 legacy 复用代码指南
+    └── archive/                      # 历史方案 + 迁移文档（已归档）
+        ├── phase3-t2h-distillation-plan.md
+        ├── snn-emotion-and-workspace-direction.md
+        ├── superpowers/               # 设计草稿 + 实施计划
+        └── migration/                 # 迁移文档
 ```
 
 ---
@@ -231,12 +245,18 @@ ninja heterobrain_engine
 - [ ] 在线 STDP 微调（不重训 LLM）
 - [ ] **里程碑**：SNN 能从对话历史中检索相关片段
 
-### Phase 3 — Bridge 转换层
+### Phase 3 — SNN 认知调度核心（情感核心 + 认知工作空间 + 工具编排）
 
-- [ ] 训练 [2048, 1024] spike → embedding 投影矩阵
-- [ ] 实现真实性筛选器（spike 一致性校验）
-- [ ] 三子系统联调
-- [ ] **里程碑**：SNN 检索结果能影响 LLM 生成质量
+> 详见 [docs/archive/snn-emotion-and-workspace-direction.md](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md)
+
+- [~] **3a 情感核心**（进行中）：6 维调质向量 ✅ + AffectiveState readout ✅ + synapse 6 维 M_ij 门控 ✅ + 250 步验证 ✅ + 稳态补偿 ✅；待做：真实文字训练验证 + LLM 调制接口接入 + **事件驱动调质注入接口**（当前情绪无语义锚点，§3.4）
+- [ ] **3b 认知黑板**：256 槽 BlackboardSlot + 读写头（替代原 50 槽 WM）+ **事件驱动调质注入**（launch_modulatory 加 inject_event + 基因硬编码映射表，与黑板一并实现，§3.4）
+- [ ] **3c 黑板-LLM 桥接**：embedding 双向 + 导出 prompt
+- [ ] **3d 工具编排**：6 工具集 + 状态驱动调用信号 + 黑板联动
+- [ ] **3e 工具调用训练**：模仿学习冷启动 + RL 微调（复用 DA 价值函数 + PSW 突触）
+- [ ] **3f 黑板-海马溢出**：短期→长期固化 + 情感印记
+- [ ] **3g 端到端验证**：情感轨迹可视化 + 多步推理 + 工具调用 demo
+- [ ] **里程碑**：SNN 在跨轮次情感维持 + 多步推理 + 工具调度上展现 LLM+RAG 做不到的能力
 
 ### Phase 4 — 评测与优化
 
@@ -271,9 +291,19 @@ ninja heterobrain_engine
 - 跨平台（Windows/Linux/macOS/Android）
 - 推理速度在 CPU 上比 transformers 快 3-5×
 
-### 为什么 SNN 不做语义生成？
+### 为什么 SNN 不做语义生成？SNN 真正的不可替代角色是什么？
 
-上一代项目 100K 步训练证明：纯 SNN 在合理规模下学不到字节级语义映射。HeteroBrain 接受这个边界，把 SNN 降级为**长程模糊记忆 + 真实性筛选**，让它做它擅长的（时序、稀疏、在线学习），让 LLM 做它擅长的（语言生成）。
+上一代项目 100K 步训练证明：纯 SNN 在合理规模下学不到字节级语义映射。HeteroBrain 接受这个边界。
+
+**但"SNN 做什么"经历三次定位迭代**：
+1. ~~长程模糊记忆 + token 真实性筛选~~（旧 README 描述，已废弃——筛选用弱评估器评强生成器，逻辑自相矛盾）
+2. ~~6 分类头逻辑处理器~~（phase3 旧方案，已废弃——分类头本质是线性分类器，2 层 MLP 即可替代，SNN 严重过度）
+3. **前额叶认知调度器**（当前方向，2026-07-30）：三层递进架构
+   - **Layer 1 情感核心**：6 维调质向量，维持跨轮次情感状态，神经调制 LLM 生成参数
+   - **Layer 2 认知工作空间**：256 槽黑板 + 读写头，让 SNN 从"只能口算"升级到"会打草稿"
+   - **Layer 3 工具编排**：6 工具 + 状态驱动调用信号，让 SNN 从"被迫当计算器"升级到"调度外部能力"
+
+这个定位立得住的依据：现有 SNN 代码已实现 31 种生物机制（4/6 调质就绪、海马索引、工作记忆、PSW STDP、丘脑门控、睡眠重放等），新方向能复用其中 20+ 种，而旧方案仅复用 PCA readout 一条线。详见 [docs/archive/snn-emotion-and-workspace-direction.md](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md)。
 
 ### 为什么保留 legacy/ 旧代码？
 
