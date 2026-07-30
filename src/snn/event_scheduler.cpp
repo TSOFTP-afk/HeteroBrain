@@ -11,6 +11,10 @@
 // (实现位于 modulatory_kernels.cu, 由 snn_train target 链接)
 namespace stage2e {
 void set_event_signal(const float modulator_delta[6], int duration_steps);
+// Phase 3a-C2: 每步开始前清零事件信号缓存, 允许同 step 多事件叠加
+//   旧实现没有此函数, 同一 step 多个事件调用 set_event_signal 时会相互覆盖
+//   新实现: dispatch_pending 处理某 step 的事件之前先 reset, 让各事件累加
+void reset_event_signal();
 }
 
 namespace stage2e {
@@ -139,6 +143,17 @@ bool EventScheduler::load_jsonl(const std::string& path) {
 }
 
 void EventScheduler::dispatch_pending(int current_step) {
+    // Phase 3a-C2 修复: 检测 step 切换, 在处理新 step 的事件前清零信号缓存
+    //   旧实现: 每个 set_event_signal 覆盖前一个, 同 step 多事件只剩最后一个
+    //   新实现: 进入新 step 时先 reset, 后续多个事件累加到一起
+    //   注意: launch_modulatory 每 100 步才读取一次, 所以这里只 reset 一次
+    //         (在进入新 step 时 reset, 不是每事件 reset)
+    if (current_step != last_dispatch_step_) {
+        reset_event_signal();
+        last_dispatch_step_ = current_step;
+    }
+
+    int event_count_this_step = 0;
     while (next_event_idx_ < events_.size() &&
            events_[next_event_idx_].step_target <= current_step) {
         const ScheduledEvent& evt = events_[next_event_idx_];
@@ -165,12 +180,15 @@ void EventScheduler::dispatch_pending(int current_step) {
         // 5. C1 仅支持 pulse 型 (duration_steps=0), plateau 留 C2
         int duration_steps = 0;
 
-        // 6. 注入到 modulatory 缓存
+        // 6. 注入到 modulatory 缓存 (累加模式, 同 step 多事件会叠加)
         set_event_signal(delta, duration_steps);
+        event_count_this_step++;
 
         if (!evt.description.empty()) {
-            fprintf(stdout, "[Event] step=%d type=%d intensity=%d desc=%s\n",
-                    evt.step_target, evt.event_type, evt.intensity, evt.description.c_str());
+            const char* tag = (event_count_this_step > 1) ? "[Event-Superposed]" : "[Event]";
+            fprintf(stdout, "%s step=%d type=%d intensity=%d (simul#%d) desc=%s\n",
+                    tag, evt.step_target, evt.event_type, evt.intensity,
+                    event_count_this_step, evt.description.c_str());
         }
 
         next_event_idx_++;

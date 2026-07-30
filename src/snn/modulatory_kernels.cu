@@ -252,8 +252,23 @@ static float* d_pred_succ_scratch = nullptr;
 static float h_empathy_signal = 0.0f;
 
 // Phase 3a-C1: 6 维事件驱动调质信号缓存 (与 h_empathy_signal 同构, 但扩展到 6 维)
+// Phase 3a-C2 修复: 改为累加模式, 支持同一 step 多事件叠加
+//   旧实现: h_event_signal[i] = v (覆盖, 后调用的事件冲掉前面的)
+//   新实现: h_event_signal[i] += v (累加, 多事件叠加后一次性注入)
+//   生命周期:
+//     - 每步 dispatch_pending 开始前由 reset_event_signal() 清零
+//     - 同一 step 多个事件依次累加
+//     - launch_modulatory 读取后清零 (单次触发模型)
 static float h_event_signal[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static int   h_event_duration_steps = 0;  // 剩余持续步数 (0=单次脉冲)
+static int   h_event_pending_count = 0;    // 当前 step 累加的事件数
+
+// Phase 3a-D1: 具身训练 reward + curiosity 缓存
+//   h_embodied_reward: 由 set_embodied_reward 设置, launch_da_value_function 读取覆盖外部 reward
+//   h_curiosity_ach: 由 set_curiosity_ach 设置, launch_modulatory 读取叠加到 ACh 通道
+//   注意: h_curiosity_ach 是持续信号 (不像 h_event_signal 单次触发), 每次调用不清零
+static float h_embodied_reward = 0.0f;
+static float h_curiosity_ach = 0.0f;
 
 // Phase 3a: 上轮 NE 均值缓存 (用于 GABA 抗焦虑反馈计算)
 static float h_last_ne_mean = 0.05f;
@@ -279,15 +294,57 @@ void set_empathy_signal(float empathy_signal) {
     h_empathy_signal = empathy_signal;
 }
 
+// Phase 3a-C2 修复: 每步开始前清零事件信号缓存, 允许同 step 多事件叠加
+// 调用时机: EventScheduler::dispatch_pending 在处理 step 的事件之前先调用此函数
+void reset_event_signal() {
+    for (int i = 0; i < 6; ++i) h_event_signal[i] = 0.0f;
+    h_event_pending_count = 0;
+    // 注意: duration 不在这里清, 因为它由事件本身指定
+}
+
+// Phase 3a-C2 修复: 累加模式, 支持同一 step 多事件叠加
+// 旧实现是 h_event_signal[i] = v (覆盖), 会导致后调用的事件冲掉前面的
+// 新实现是 h_event_signal[i] += v (累加), 多事件叠加后一次性注入
+// 叠加后 clamp 到 [-1.5, 1.5] (允许超调, 但有上限防爆炸)
 void set_event_signal(const float modulator_delta[6], int duration_steps) {
     for (int i = 0; i < 6; ++i) {
         float v = modulator_delta[i];
+        // 单事件 delta 先 clamp 到 [-1, 1]
         if (v < -1.0f) v = -1.0f;
         if (v > 1.0f) v = 1.0f;
-        h_event_signal[i] = v;
+        // 累加 (非覆盖)
+        h_event_signal[i] += v;
+        // 叠加后 clamp 到 [-1.5, 1.5] (允许 2-3 事件叠加超调, 但防止爆炸)
+        if (h_event_signal[i] < -1.5f) h_event_signal[i] = -1.5f;
+        if (h_event_signal[i] > 1.5f) h_event_signal[i] = 1.5f;
     }
-    h_event_duration_steps = duration_steps > 0 ? duration_steps : 0;
+    // duration 取最大值 (长持续时间事件不应被短事件截断)
+    if (duration_steps > h_event_duration_steps) {
+        h_event_duration_steps = duration_steps;
+    }
+    h_event_pending_count++;
 }
+
+// Phase 3a-C2: 查询当前 step 累加的事件数 (诊断用)
+int get_event_pending_count() {
+    return h_event_pending_count;
+}
+
+// Phase 3a-D1: 具身训练 reward + curiosity 接口
+void set_embodied_reward(float reward) {
+    if (reward < -1.0f) reward = -1.0f;
+    if (reward > 1.0f) reward = 1.0f;
+    h_embodied_reward = reward;
+}
+
+void set_curiosity_ach(float pred_error) {
+    if (pred_error < 0.0f) pred_error = 0.0f;
+    if (pred_error > 1.0f) pred_error = 1.0f;
+    h_curiosity_ach = pred_error * 0.3f;  // clamp ACh增量到[0, 0.3]
+}
+
+float get_last_embodied_reward() { return h_embodied_reward; }
+float get_last_curiosity_ach() { return h_curiosity_ach; }
 
 ModulatoryRuntimeState export_modulatory_runtime_state() {
     return {h_v_s, h_v_sp};
@@ -392,6 +449,8 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
 
     // ACh: 基线 0.2 + 惊奇 (novelty) + 注意力 (余弦相似度预测成功率)
     float ach_signal = 0.2f + 0.3f * novelty + 0.1f * h_pred_succ_cos;
+    // Phase 3a-D1: 好奇心驱动的ACh (持续信号, 不清零)
+    ach_signal += h_curiosity_ach;
 
     // NE: 基线 0.05 + KL 散度触发
     float ne_signal = 0.05f;
@@ -423,6 +482,7 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
 
     // Phase 3a-C1: 读取事件驱动 6 维调质增量 (优先级高于 empathy)
     //   事件信号叠加到各通道, 然后统一经过受体灵敏度衰减 (稳态补偿仍生效)
+    // Phase 3a-C2 修复: h_event_signal 已是累加结果 (同一 step 多事件叠加)
     bool has_event = false;
     float eff_event[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
     for (int i = 0; i < 6; ++i) {
@@ -432,6 +492,47 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
         }
     }
     if (has_event) {
+        // Phase 3a-C2: 调质非线性交互 (生物脑中调质之间存在拮抗/协同)
+        //   索引: [0]=DA, [1]=ACh, [2]=NE, [3]=5HT, [4]=GABA, [5]=Oxy
+        //   规则 1: DA ↔ 5HT 拮抗 (DA↑ 时 5HT 效应减弱, 反之亦然)
+        //     生物学依据: 中脑边缘 DA 通路与中缝核 5HT 通路相互抑制
+        //     实现: 同号部分互相削减 (DA+ 与 5HT+ 同时存在时互相抵消一部分)
+        //   规则 2: NE → GABA 抑制 (NE 释放会减少 GABA 能抑制)
+        //     生物学依据: 蓝斑 NE 投射到 GABA 能中间神经元产生抑制
+        //   规则 3: Oxy 放大 DA 奖赏 (催产素增强 DA 奖赏效应)
+        //     生物学依据: Oxy 与 DA 在伏隔核协同, 促进社交奖赏
+        float da = eff_event[0];
+        float ach = eff_event[1];
+        float ne = eff_event[2];
+        float ht5 = eff_event[3];
+        float gaba = eff_event[4];
+        float oxy = eff_event[5];
+
+        // 规则 1: DA-5HT 拮抗 (仅在两者同号时生效, 避免反向增强)
+        if (da > 0.0f && ht5 > 0.0f) {
+            float antagonism = 0.2f * fminf(da, ht5);
+            da -= antagonism;
+            ht5 -= antagonism;
+        }
+        // 规则 2: NE 抑制 GABA (NE↑ 时 GABA 释放减弱)
+        if (ne > 0.0f && gaba > 0.0f) {
+            float inhibition = 0.3f * ne * gaba;
+            gaba -= inhibition;
+            if (gaba < 0.0f) gaba = 0.0f;
+        }
+        // 规则 3: Oxy 放大 DA 奖赏 (仅在 DA 正向时生效)
+        if (oxy > 0.0f && da > 0.0f) {
+            da *= (1.0f + 0.5f * oxy);
+        }
+
+        // 写回 eff_event
+        eff_event[0] = da;
+        eff_event[1] = ach;
+        eff_event[2] = ne;
+        eff_event[3] = ht5;
+        eff_event[4] = gaba;
+        eff_event[5] = oxy;
+
         da_signal       = fmaxf(0.0f, da_signal       + eff_event[0]);
         ach_signal      = fmaxf(0.0f, ach_signal      + eff_event[1]);
         ne_signal       = fmaxf(0.0f, ne_signal       + eff_event[2]);
@@ -441,6 +542,7 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
         // 单次触发: 清零缓存 (plateau 型保留直到 duration 归零)
         if (h_event_duration_steps <= 0) {
             for (int i = 0; i < 6; ++i) h_event_signal[i] = 0.0f;
+            h_event_pending_count = 0;
         } else {
             h_event_duration_steps -= 100;  // launch_modulatory 每 100 步调用一次
         }
@@ -516,7 +618,12 @@ void launch_da_value_function(MemoryAllocator* alloc, int step,
     CUDA_CHECK_2E(cudaMemcpy(&h_v_sp, d_v_scratch, sizeof(float), cudaMemcpyDeviceToHost));
 
     // 7. TD error: δ = R + γ·V(s') - V(s)
-    float delta = reward + TD_GAMMA * h_v_sp - h_v_s;
+    // Phase 3a-D1: 具身模式覆盖 reward (h_embodied_reward 非零时使用)
+    float effective_reward = reward;
+    if (fabsf(h_embodied_reward) > 1e-6f) {
+        effective_reward = h_embodied_reward;
+    }
+    float delta = effective_reward + TD_GAMMA * h_v_sp - h_v_s;
 
     // 8. w_value TD 学习更新 (w_pred 更新已拆分至步骤 9)
     td_update_kernel<<<sc_blocks, THREADS_PER_BLOCK_2E>>>(

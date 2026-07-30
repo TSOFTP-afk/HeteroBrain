@@ -40,6 +40,8 @@ public:
 private:
     std::vector<ScheduledEvent> events_;
     size_t next_event_idx_ = 0;
+    // Phase 3a-C2: 记录上次 dispatch 的 step, 用于检测 step 切换并 reset 信号缓存
+    int last_dispatch_step_ = -1;
 };
 
 } // namespace stage2e
