@@ -860,6 +860,88 @@ int main(int argc, char** argv) {
 
     printf("\n[P1] 开始 %d 步快时间尺度测试...\n\n", total_steps);
 
+    // ==================== Phase 3a-D3: 课程评估模式 ====================
+    // --curriculum-eval: 加载 checkpoint 后冻结权重, 对 N 个课程样本
+    // 统计工具调用准确率 + 调质预测误差, 完成后退出
+    if (curriculum_active && config.curriculum_eval) {
+        const int n_eval = std::min(config.curriculum_eval_samples,
+                                    static_cast<int>(curriculum_loader.total_samples()));
+        scheduler.set_bptt_freeze(true);
+        printf("[CurriculumEval] 评估 %d 个样本 (权重冻结, readout 不被更新)...\n", n_eval);
+
+        const stage2e::PersonalityProfile& prof =
+            stage2e::personality_profile(static_cast<stage2e::CurriculumStage>(config.curriculum_stage));
+        const int win = config.bptt_window_size;
+        int tool_correct = 0;
+        int tool_total = 0;
+        double mod_mse_sum = 0.0, mod_mae_sum = 0.0;
+        float last_h_tool[7] = {0};
+        int step = start_step;
+
+        for (int s = 0; s < n_eval; ++s) {
+            const stage2e::CurriculumSample* smp = curriculum_loader.sample(s);
+            if (!smp) continue;
+            scheduler.set_curriculum_mode(smp->target_modulators, smp->target_tool_call,
+                                          config.curriculum_lr,
+                                          prof.bptt_loss_weight_mod, prof.bptt_loss_weight_tool);
+            // 跑一个窗口, 注入样本事件
+            for (int t = 0; t < win; ++t) {
+                stage2e::reset_event_signal();
+                for (const auto& evt : smp->events) {
+                    if (evt.step_offset == t) {
+                        stage2e::GeneMapEntry entry = stage2e::GENE_MAP_BASE[evt.event_type];
+                        entry = stage2e::apply_modifiers(entry, 0, evt.intensity);
+                        float delta[6] = {entry.da_delta, entry.ach_delta,
+                                          entry.ne_delta, entry.ht5_delta,
+                                          entry.gaba_delta, entry.oxy_delta};
+                        stage2e::set_event_signal(delta, 0);
+                    }
+                }
+                scheduler.step(step++);
+            }
+            // 窗口末: readout 前向 + 读 logits
+            stage2e::PersistentBuffers& b = allocator.buffers();
+            stage2e::launch_curriculum_readout_forward(b);
+            float h_mod[6] = {0}, h_tool[7] = {0};
+            cudaMemcpy(h_mod, b.d_curriculum_logits, 6 * sizeof(float), cudaMemcpyDeviceToHost);
+            cudaMemcpy(h_tool, b.d_curriculum_tool_logits, 7 * sizeof(float), cudaMemcpyDeviceToHost);
+            for (int t = 0; t < 7; ++t) last_h_tool[t] = h_tool[t];
+
+            int pred_tool = 0;
+            for (int t = 1; t < 7; ++t) if (h_tool[t] > h_tool[pred_tool]) pred_tool = t;
+            const bool tool_ok = (pred_tool == smp->target_tool_call);
+            tool_correct += tool_ok ? 1 : 0;
+            tool_total++;
+            double mse = 0.0, mae = 0.0;
+            for (int m = 0; m < 6; ++m) {
+                double e = h_mod[m] - smp->target_modulators[m];
+                mse += e * e; mae += std::fabs(e);
+            }
+            mse /= 6.0; mae /= 6.0;
+            mod_mse_sum += mse; mod_mae_sum += mae;
+
+            printf("[CurriculumEval] sample=%d n_events=%zu target_tool=%d pred_tool=%d %s | "
+                   "mod MSE=%.4f MAE=%.4f\n",
+                   smp->sample_id, smp->events.size(),
+                   smp->target_tool_call, pred_tool, tool_ok ? "OK " : "FAIL",
+                   mse, mae);
+        }
+
+        printf("\n[CurriculumEval] ===== 汇总 (checkpoint 评估) =====\n");
+        printf("[CurriculumEval] 工具调用准确率: %d/%d = %.1f%%\n",
+               tool_correct, tool_total,
+               tool_total ? 100.0 * tool_correct / tool_total : 0.0);
+        printf("[CurriculumEval] 调质预测: MSE=%.4f  MAE=%.4f\n",
+               tool_total ? mod_mse_sum / tool_total : 0.0,
+               tool_total ? mod_mae_sum / tool_total : 0.0);
+        printf("[CurriculumEval] 工具类 softmax 分布抽查 (最后样本): [");
+        for (int t = 0; t < 7; ++t) printf(" %.3f", last_h_tool[t]);
+        printf(" ]\n");
+
+        allocator.free_all();
+        return 0;
+    }
+
     // --- Phase 3a-C1: 事件驱动调质注入 ---
     // 加载 events.jsonl, 每 100 步 (launch_modulatory 间隔) 派发到期事件
     // 派发在 scheduler.step() 之前, 确保事件信号被当次 launch_modulatory 读取

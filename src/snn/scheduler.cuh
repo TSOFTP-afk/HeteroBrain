@@ -247,6 +247,10 @@ public:
     // 最近一次课程 BPTT loss (w_mod·MSE + w_tool·CE)
     float curriculum_last_loss() const { return curriculum_last_loss_; }
 
+    // 冻结 BPTT 更新 (评估模式): bptt_step 只做前向 + loss 记录, 不反传不更新
+    void set_bptt_freeze(bool freeze) { bptt_freeze_ = freeze; }
+    bool bptt_freeze() const { return bptt_freeze_; }
+
     // Task D3: 暴露 d_gate_states_ 供 main.cpp 在 BPE 注入时使用
     // (BPE 模式下 main.cpp 在 step() 之前调用 launch_bpe_inject, 需要传入门控状态)
     const ThalamicGateState* d_gate_states_for_inject() const { return d_gate_states_; }
@@ -396,6 +400,7 @@ private:
     float curriculum_w_mod_ = 1.0f;         // 调质损失权重
     float curriculum_w_tool_ = 0.3f;        // 工具损失权重 (初中 0.3)
     float curriculum_last_loss_ = 0.0f;     // 最近一次课程 BPTT loss
+    bool  bptt_freeze_ = false;             // 冻结 BPTT 更新 (评估模式)
 
     // PCA 增量更新 (每 PCA_UPDATE_INTERVAL 步, CPU 端 Oja's rule)
     void launch_pca_update_cpu(int step);

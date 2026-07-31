@@ -43,6 +43,8 @@ struct RunConfig {
     std::string curriculum_path;        // --curriculum PATH (课程 JSONL)
     int curriculum_stage = 1;           // --stage 1=初中(默认) 2=高中 0=启蒙 3=成年
     float curriculum_lr = 0.001f;       // --curriculum-lr readout 学习率
+    bool curriculum_eval = false;       // --curriculum-eval 评估模式 (冻结权重, 统计工具/调质准确率)
+    int  curriculum_eval_samples = 20;  // --curriculum-eval-samples N 评估样本数
     // ==================== Phase 3a-D1: 具身发育训练 ====================
     bool embodied_mode = false;
     std::string embodied_scene = "hunger_feeding";  // 默认场景

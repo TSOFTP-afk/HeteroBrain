@@ -4,6 +4,7 @@
 #include "neuron_kernels.cuh"
 #include "modulatory_kernels.cuh"
 #include "bptt_trainer.cuh"  // Task E1: BPTTConfig 用于 capture/restore BPTT 状态
+#include "bptt_curriculum.cuh"  // Phase 3a-D3: 课程 readout 权重 checkpoint 持久化
 
 #include <algorithm>
 #include <cerrno>
@@ -257,6 +258,12 @@ std::vector<Section> SchedulerCheckpointAccess::make_sections(
     // 放在 section 表末尾, 旧版 checkpoint 未含此 section 时 load 端可优雅降级
     add(&s, "decode_weights", b.d_decode_weights,
         (uint64_t)N_TOTAL_NEURONS_2E * 256, sizeof(float));
+    // 课程 readout 权重 (Phase 3a-D3, 调质 N×6 + 工具 N×7)
+    // 放在 section 表末尾, 旧版 checkpoint 未含时 load 端优雅降级 (随机初始化)
+    add(&s, "curriculum_readout", b.d_curriculum_readout_weights,
+        (uint64_t)N_TOTAL_NEURONS_2E * 6, sizeof(float));
+    add(&s, "curriculum_tool_readout", b.d_curriculum_tool_weights,
+        (uint64_t)N_TOTAL_NEURONS_2E * CURRICULUM_N_TOOL, sizeof(float));
     return s;
 }
 
@@ -559,14 +566,14 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
     ok = read_exact(fp, disk.data(), disk.size() * sizeof(DiskSection));
     SchedulerState state{};
     auto sections = SchedulerCheckpointAccess::make_sections(this, &state);
-    // decode_weights 为可选 section (旧版 v3 checkpoint 未包含), 缺失时需优雅降级
-    bool decode_weights_missing = false;
+    // 兼容: 磁盘 section 可以是新 sections 的严格前缀
+    //   (缺失末尾 1-2 个 section: 旧版无课程 readout / 更旧无 decode_weights)
+    int missing_tail = 0;
     if (!ok || !section_layout_matches(sections, disk)) {
-        // 旧版兼容: 若磁盘仅缺少末尾的 decode_weights, 视为合法旧 checkpoint
-        const bool tail_is_decode = !sections.empty() &&
-            std::strcmp(sections.back().name, "decode_weights") == 0 &&
-            disk.size() + 1 == sections.size();
-        bool prefix_ok = tail_is_decode;
+        const bool prefix_layout_ok =
+            disk.size() <= sections.size() &&
+            sections.size() - disk.size() <= 2;
+        bool prefix_ok = prefix_layout_ok;
         for (size_t i = 0; prefix_ok && i < disk.size(); ++i) {
             if (std::strncmp(sections[i].name, disk[i].name, sizeof(disk[i].name)) != 0 ||
                 sections[i].bytes != disk[i].bytes) {
@@ -578,19 +585,18 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
             std::fprintf(stderr, "[Checkpoint] section layout mismatch: %s\n", path);
             return 4;
         }
-        decode_weights_missing = true;
+        missing_tail = static_cast<int>(sections.size() - disk.size());
     }
     uint64_t expected_payload_bytes = 0;
-    for (const auto& section : sections) {
-        if (decode_weights_missing &&
-            std::strcmp(section.name, "decode_weights") == 0) {
-            continue;  // 旧 checkpoint 无此 section, 不计入 payload
+    for (size_t si = 0; si < sections.size(); ++si) {
+        if (static_cast<int>(si) >= static_cast<int>(sections.size()) - missing_tail) {
+            continue;  // 缺失的尾部 section 不计入 payload
         }
-        if (!section.pointer && section.bytes > 0) {
+        if (!sections[si].pointer && sections[si].bytes > 0) {
             std::fclose(fp);
             return 4;
         }
-        expected_payload_bytes += section.bytes;
+        expected_payload_bytes += sections[si].bytes;
     }
     if (header.payload_bytes != expected_payload_bytes) {
         std::fclose(fp);
@@ -634,10 +640,12 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
         std::fclose(fp);
         return 6;
     }
-    for (const auto& section : sections) {
-        // 旧 checkpoint 缺少 decode_weights: 跳过读取, 循环结束后零初始化
-        if (decode_weights_missing &&
-            std::strcmp(section.name, "decode_weights") == 0) {
+    std::vector<std::string> missing_names;
+    for (size_t si = 0; si < sections.size(); ++si) {
+        const auto& section = sections[si];
+        if (static_cast<int>(si) >= static_cast<int>(sections.size()) - missing_tail) {
+            // 缺失的尾部 section: 跳过读取, 循环后按类型初始化
+            missing_names.emplace_back(section.name);
             continue;
         }
         uint64_t offset = 0;
@@ -656,13 +664,20 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
             offset += count;
         }
     }
-    // decode_weights 在旧 checkpoint 中不存在: 零初始化并告警
-    if (decode_weights_missing) {
-        PersistentBuffers& pb = alloc_->buffers();
-        const cudaError_t err = cudaMemset(pb.d_decode_weights, 0,
-            (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float));
-        if (err != cudaSuccess) ok = false;
-        std::printf("[Checkpoint] 警告: decode_weights section 未找到, 用零初始化\n");
+    // 缺失 section 的初始化策略 (按类型):
+    //   decode_weights: 零初始化 (原兼容行为)
+    //   curriculum readout: 随机小值 (与训练初始一致, 支持续训重新学习)
+    PersistentBuffers& pb = alloc_->buffers();
+    for (const auto& name : missing_names) {
+        if (name == "decode_weights") {
+            const cudaError_t err = cudaMemset(pb.d_decode_weights, 0,
+                (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float));
+            if (err != cudaSuccess) ok = false;
+            std::printf("[Checkpoint] 警告: decode_weights section 未找到, 用零初始化\n");
+        } else if (name == "curriculum_readout" || name == "curriculum_tool_readout") {
+            launch_curriculum_readout_init(pb, 0.01f, 42u);
+            std::printf("[Checkpoint] 警告: curriculum readout 未找到, 用随机小值初始化\n");
+        }
     }
     std::fclose(fp);
     if (!ok || state.state_version != 1 || state.state_bytes != sizeof(state)) return 7;

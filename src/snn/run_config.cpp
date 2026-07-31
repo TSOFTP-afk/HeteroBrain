@@ -220,6 +220,15 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
                 *error = std::string("invalid value for --curriculum-lr: ") + value;
                 return false;
             }
+        } else if (arg == "--curriculum-eval") {
+            // Phase 3a-D3: 评估模式 (冻结权重, 统计工具调用/调质预测准确率)
+            config->curriculum_eval = true;
+        } else if (arg == "--curriculum-eval-samples") {
+            // Phase 3a-D3: 评估样本数
+            value = require_value(&i, "--curriculum-eval-samples");
+            if (!value) return false;
+            if (!parse_long(value, 1, 100000, "--curriculum-eval-samples", &parsed, error)) return false;
+            config->curriculum_eval_samples = static_cast<int>(parsed);
         } else if (arg == "--embodied") {
             // Phase 3a-D1: 具身发育训练模式
             config->embodied_mode = true;
@@ -275,6 +284,8 @@ const char* run_config_usage() {
         "  --curriculum PATH         Phase 3a-D3 curriculum training data (JSONL)\n"
         "  --curriculum-stage N      curriculum stage: 0=enlightenment 1=middle(默认) 2=high 3=adult\n"
         "  --curriculum-lr F         curriculum readout learning rate (default: 0.001)\n"
+        "  --curriculum-eval         eval mode: freeze weights, report tool-accuracy & modulator MSE\n"
+        "  --curriculum-eval-samples N  number of eval samples (default: 20)\n"
         "  --embodied                enable embodied developmental mode (Phase 3a-D1)\n"
         "  --embodied-scene ID       specify scene: hunger_feeding|warmth_safety|startle_recover|sleep_wake|discomfort_change\n"
         "  -h, --help                show this help\n";

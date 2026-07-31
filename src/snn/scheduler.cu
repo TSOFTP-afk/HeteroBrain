@@ -1633,6 +1633,16 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
         launch_curriculum_error(buf, curriculum_target_mod_, curriculum_target_tool_,
                                 curriculum_w_mod_, curriculum_w_tool_,
                                 &curriculum_last_loss_);
+        bptt_last_loss_ = curriculum_last_loss_;
+        bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
+        bptt_current_lr_ = bptt_trainer_->get_current_lr(current_step);
+
+        // 评估模式: 只做前向 + loss 记录, 冻结所有权重更新
+        if (bptt_freeze_) {
+            bptt_step_counter_ = 0;
+            return;
+        }
+
         // 3. 反向: 两路误差合并注入最终步梯度, 复用反向循环
         bptt_trainer_->backward_curriculum(buf, curriculum_w_mod_, curriculum_w_tool_);
         // 4. 突触权重更新 (SGD + 裁剪)
@@ -1641,8 +1651,7 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
         launch_curriculum_readout_update(buf, curriculum_readout_lr_,
                                          curriculum_w_mod_, curriculum_w_tool_);
 
-        // 缓存指标 (loss 已由步骤 2 更新)
-        bptt_last_loss_ = curriculum_last_loss_;
+        // 缓存指标
         bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
         bptt_current_lr_ = bptt_trainer_->get_current_lr(current_step);
     } else {
