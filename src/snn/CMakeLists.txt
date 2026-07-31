@@ -55,6 +55,11 @@ set(SNN_TRAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/input_encoding.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/run_config.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/event_scheduler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embodied_env.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embodied_motor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embodied_motor.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/multi_sensory_inject.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/motor_teacher.cu
 )
 
 # snn_decoder: 独立解码评估工具 (host-only, decoder.cu 实为 host 代码, 强制 CXX 编译)
@@ -108,6 +113,29 @@ if(MSVC)
         $<$<COMPILE_LANGUAGE:CXX>:/wd4305>
     )
 endif()
+
+# =============================================================================
+# Phase 3a-D1: Embodied Environment 单元测试 (无 CUDA 依赖)
+# test_embodied.cpp 定义 SNN_NO_CUDA, 排除 read_motor_output (GPU版本)
+# =============================================================================
+add_executable(test_embodied
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_embodied.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embodied_env.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/embodied_motor.cpp
+)
+target_include_directories(test_embodied PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(test_embodied PRIVATE SNN_NO_CUDA)
+if(MSVC)
+    target_compile_options(test_embodied PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4244>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4267>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4305>
+    )
+endif()
+set_target_properties(test_embodied PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
 
 # CUDA 编译选项: -O3 (Release) + -lineinfo (profiling 用 debug 信息)
 target_compile_options(snn_train PRIVATE

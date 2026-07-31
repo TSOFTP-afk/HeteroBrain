@@ -191,6 +191,21 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
             value = require_value(&i, "--bpe-data");
             if (!value) return false;
             config->bpe_data_path = value;
+        } else if (arg == "--event-stream") {
+            // Phase 3a-C1: 事件驱动调质注入流文件路径
+            value = require_value(&i, "--event-stream");
+            if (!value) return false;
+            config->event_stream_path = value;
+            config->event_stream_enabled = true;
+        } else if (arg == "--embodied") {
+            // Phase 3a-D1: 具身发育训练模式
+            config->embodied_mode = true;
+        } else if (arg == "--embodied-scene") {
+            // Phase 3a-D1: 指定具身场景
+            value = require_value(&i, "--embodied-scene");
+            if (!value) return false;
+            config->embodied_scene = value;
+            config->embodied_mode = true;  // 指定场景自动启用
         } else {
             *error = "unknown option: " + arg;
             return false;
@@ -232,6 +247,9 @@ const char* run_config_usage() {
         "  --bptt-surrogate-alpha F  surrogate gradient sigmoid slope (default: 4.0)\n"
         "  --input-mode MODE         input mode: bpe (default) or byte\n"
         "  --bpe-data PATH           BPE token binary file path (.bin int32 stream)\n"
+        "  --event-stream PATH       enable event-driven modulator injection from JSONL\n"
+        "  --embodied                enable embodied developmental mode (Phase 3a-D1)\n"
+        "  --embodied-scene ID       specify scene: hunger_feeding|warmth_safety|startle_recover|sleep_wake|discomfort_change\n"
         "  -h, --help                show this help\n";
 }
 

@@ -79,11 +79,16 @@ struct PersistentBuffers {
     float2*            d_nmda_post_state = nullptr;  // 55,000 × (V_norm, Mg factor) 瞬态缓存, 每步由 nmda_post_state_kernel 从 d_neurons 重算, 无需 checkpoint
     float*             d_inhibitory_current;     // 55,000 × 4B
 
-    // 调质浓度 (4 种 × 55K × 4B = 0.88 MB)
+    // 调质浓度 (6 种 × 55K × 4B = 1.32 MB, Phase 3a 扩充)
     float*             d_da_concentration;       // 55,000
     float*             d_ach_concentration;      // 55,000
     float*             d_ne_concentration;       // 55,000
     float*             d_ht5_concentration;      // 55,000
+    float*             d_gaba_concentration;     // 55,000  Phase 3a: GABA (抑制/平静)
+    float*             d_oxytocin_concentration; // 55,000  Phase 3a: 催产素 (共情/社交联结)
+    // 催产素受体密度 (按突触索引查表, 避免破坏 BioSynapse 80B 对齐)
+    //   仅 SocialBonding 相关突触子集有非零密度, 默认 OXYTOCIN_RECEPTOR_INIT
+    uint8_t*           d_oxytocin_receptor;      // N_SYNAPSES  Phase 3a
 
     // 海马体索引 (v3 强化 C: 50K × 256B = 12.8 MB)
     HippoIndex*        d_hippo_indices;          // 50,000

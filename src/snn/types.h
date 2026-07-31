@@ -88,30 +88,39 @@ struct BioSynapse {
     float utilization;              // 4B  offset 56  STP 利用率 U
     float scaling_factor;           // 4B  offset 60  局部突触缩放因子
 
-    // 64-79: CaMKII + 调质受体 (16B, v3 强化 B + v4 强化 K)
+    // 64-79: CaMKII + 调质受体 (16B, v3 强化 B + v4 强化 K + Phase 3a 扩充)
     float camkii_autophosph;        // 4B  offset 64  v4 强化 K: 自磷酸化水平 [0,1]
     float da_receptor;              // 4B  offset 68  DA 受体密度 (D1+/D2-)
     float ach_receptor;             // 4B  offset 72  ACh 受体密度
     uint8_t receptor_flags;         // 1B  offset 76  AMPA|NMDA|GABA_A|GABA_B
     uint8_t ne_receptor_u8;         // 1B  offset 77  NE 受体 (定点: /127.0f)
     uint8_t ht5_receptor_u8;        // 1B  offset 78  5HT 受体 (定点: /127.0f)
-    uint8_t _pad;                   // 1B  offset 79
+    uint8_t gaba_receptor_u8;       // 1B  offset 79  GABA 调质受体 (Phase 3a, 定点: /127.0f)
+    // 注: 原 _pad[1] 已被 gaba_receptor_u8 占用, 保持 80B 对齐不变
+    //     催产素受体因无空闲字节, 改为复用 da_receptor 符号位空间不足, 故单独存到
+    //     d_oxytocin_receptor 全局缓冲 (按突触索引查表), 避免破坏 80B 对齐
 };
 static_assert(sizeof(BioSynapse) == 80,
-              "BioSynapse must be exactly 80 bytes (v3 强化 B + v4 强化 I/J/K)");
+              "BioSynapse must be exactly 80 bytes (v3 强化 B + v4 强化 I/J/K + Phase 3a)");
 
-// 内联辅助: 获取 NE/5HT 受体密度 (从定点恢复)
+// 内联辅助: 获取 NE/5HT/GABA 受体密度 (从定点恢复)
 __host__ __device__ inline float get_ne_receptor(const BioSynapse& s) {
     return static_cast<float>(s.ne_receptor_u8) / 127.0f;
 }
 __host__ __device__ inline float get_ht5_receptor(const BioSynapse& s) {
     return static_cast<float>(s.ht5_receptor_u8) / 127.0f;
 }
+__host__ __device__ inline float get_gaba_receptor(const BioSynapse& s) {
+    return static_cast<float>(s.gaba_receptor_u8) / 127.0f;
+}
 __host__ __device__ inline void set_ne_receptor(BioSynapse& s, float v) {
     s.ne_receptor_u8 = static_cast<uint8_t>(v * 127.0f);
 }
 __host__ __device__ inline void set_ht5_receptor(BioSynapse& s, float v) {
     s.ht5_receptor_u8 = static_cast<uint8_t>(v * 127.0f);
+}
+__host__ __device__ inline void set_gaba_receptor(BioSynapse& s, float v) {
+    s.gaba_receptor_u8 = static_cast<uint8_t>(v * 127.0f);
 }
 
 // -----------------------------------------------------------------------------
@@ -187,6 +196,14 @@ struct NetworkStats2e {
     float ach_level;
     float ne_level;
     float ht5_level;
+    float gaba_level;           // Phase 3a: GABA 均值
+    float oxytocin_level;       // Phase 3a: 催产素均值
+    // Phase 3a: PAD 情感模型 + LLM 调制信号 (每 100 步由 get_affective_state 更新)
+    float pleasure;             // [-1, 1]
+    float arousal;              // [-1, 1]
+    float dominance;            // [-1, 1]
+    float temperature_delta;    // LLM temperature 偏移 [-0.5, +0.5]
+    float empathy_level;        // [0, 1]
     float mean_nmda_conductance;
     int   active_synapses;
     int   pruned_this_step;

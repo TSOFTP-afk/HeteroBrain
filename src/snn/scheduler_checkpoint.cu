@@ -221,6 +221,9 @@ std::vector<Section> SchedulerCheckpointAccess::make_sections(
     add(&s, "ach_concentration", b.d_ach_concentration, N_TOTAL_NEURONS_2E, sizeof(float));
     add(&s, "ne_concentration", b.d_ne_concentration, N_TOTAL_NEURONS_2E, sizeof(float));
     add(&s, "ht5_concentration", b.d_ht5_concentration, N_TOTAL_NEURONS_2E, sizeof(float));
+    add(&s, "gaba_concentration", b.d_gaba_concentration, N_TOTAL_NEURONS_2E, sizeof(float));
+    add(&s, "oxytocin_concentration", b.d_oxytocin_concentration, N_TOTAL_NEURONS_2E, sizeof(float));
+    add(&s, "oxytocin_receptor", b.d_oxytocin_receptor, N_TOTAL_SYNAPSES_2E, sizeof(uint8_t));
     add(&s, "hippo_indices", b.d_hippo_indices, HIPP_INDEX_SIZE, sizeof(HippoIndex));
     add(&s, "coact_trackers", b.d_coact_trackers, COACT_TRACKER_SIZE, sizeof(CoactTracker));
     add(&s, "wm_slots", b.d_wm_slots, WM_SLOTS, sizeof(WMSlot));

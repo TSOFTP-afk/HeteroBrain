@@ -316,7 +316,7 @@ void init_synapses_host(std::vector<BioSynapse>& h_synapses,
         s.receptor_flags = flags;
         set_ne_receptor(s, NE_RECEPTOR_INIT);
         set_ht5_receptor(s, HT5_RECEPTOR_INIT);
-        s._pad = 0;
+        set_gaba_receptor(s, GABA_RECEPTOR_INIT);  // Phase 3a
         // PSW 初始化: α/(α+β) = |w|/W_MAX, 总证据 α+β=0.1 (弱先验)
         float w_ratio = fabsf(weight) / STDP_W_MAX_2E;
         if (w_ratio > 0.999f) w_ratio = 0.999f;
@@ -690,7 +690,7 @@ int init_l5_to_motor_synapses(BioSynapse* d_l5_to_motor_synapses,
             s.receptor_flags = 0x03;                   // AMPA + NMDA (兴奋性)
             set_ne_receptor(s, NE_RECEPTOR_INIT);
             set_ht5_receptor(s, HT5_RECEPTOR_INIT);
-            s._pad = 0;
+            set_gaba_receptor(s, GABA_RECEPTOR_INIT);  // Phase 3a
         }
     }
 
@@ -723,6 +723,13 @@ void init_buffers_zero(MemoryAllocator* alloc) {
     CUDA_CHECK_2E(cudaMemset(b.d_ach_concentration, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
     CUDA_CHECK_2E(cudaMemset(b.d_ne_concentration, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
     CUDA_CHECK_2E(cudaMemset(b.d_ht5_concentration, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
+    // Phase 3a: GABA/催产素浓度初始化为 0 (基线由 launch_modulatory 注入)
+    CUDA_CHECK_2E(cudaMemset(b.d_gaba_concentration, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
+    CUDA_CHECK_2E(cudaMemset(b.d_oxytocin_concentration, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
+    // Phase 3a: 催产素受体初始化为 OXYTOCIN_RECEPTOR_INIT (按突触索引)
+    CUDA_CHECK_2E(cudaMemset(b.d_oxytocin_receptor,
+                              static_cast<uint8_t>(OXYTOCIN_RECEPTOR_INIT * 127.0f),
+                              N_TOTAL_SYNAPSES_2E * sizeof(uint8_t)));
     CUDA_CHECK_2E(cudaMemset(b.d_spike_flags, 0, N_TOTAL_NEURONS_2E * sizeof(bool)));
     CUDA_CHECK_2E(cudaMemset(b.d_replay_injection, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
     // 延迟环形队列清零

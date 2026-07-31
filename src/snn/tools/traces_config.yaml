@@ -1,0 +1,1337 @@
+# ============================================================================
+# 合成神经调质轨迹数据集配置 v5 (72 场景 + 4 维细化 + 9 分类)
+# ============================================================================
+# 4 个细化维度:
+#   1. 时间阶段划分: baseline → CS → US → recovery
+#   2. 脑区特异性: VTA/striatum/PFC/amygdala/hippocampus/hypothalamus
+#   3. 刺激强度梯度: weak / medium / strong
+#   4. 行为关联标注: approach / freezing / lever_press / exploration 等
+#
+# 72 个场景 (9 大分类, 详见 categories 字段):
+#   奖赏类 (8): reward_anticipation / delivery / omission / extinction / uncertain /
+#               contrast / delay_discounting / food_vs_drug_reward
+#   应激类 (8): stress_acute_looming / chronic_unpredictable / restraint / social_defeat /
+#               post_restraint_recovery / ptsd_reexperiencing / cold_water / unavoidable_shock
+#   社交类 (10): social_investigation / bonding / isolation / rejection / maternal_bonding /
+#                male_aggression / hierarchy_dominant / hierarchy_subordinate /
+#                empathy_pain_observation / mate_choice
+#   认知类 (10): cognitive_attention / learning / habituation / decision / working_memory /
+#                reversal_learning / episodic_encoding / episodic_retrieval /
+#                risky_decision / motor_learning
+#   病理类 (16): addiction_cocaine / withdrawal / depression / fear_conditioning /
+#                fear_extinction / meditation_compassion / schizophrenia_pos / neg /
+#                bipolar_mania / depression / anxiety / ocd / adhd / autism /
+#                alcohol_intoxication / withdrawal  (全部 enabled: false)
+#   生理节律类 (7): sleep_rem / sleep_nrem / circadian_morning / exercise_aerobic /
+#                  hunger_state / satiety_state / sexual_arousal
+#   情绪调节类 (4): emotion_reappraisal / suppression / mindfulness_breathing /
+#                  emotional_memory_consolidation
+#   治疗干预类 (6): ssri_treatment / benzodiazepine_acute / antipsychotic_d2_block /
+#                  psilocybin_therapy / mdma_empathogen / deep_brain_stimulation  (enabled: false)
+#   学习记忆类 (3): fear_reconsolidation / spatial_navigation / procedural_habit
+# ============================================================================
+
+global:
+  duration_s: 300.0          # A2: 120s → 300s, 给恢复期足够时间验证恢复能力
+  fs_hz: 100.0
+  noise_std_scale: 1.0
+  da_5ht_coupling: 0.3
+
+# ============================================================================
+# 场景分类映射 (生成器动态读取: 类别名 -> 场景名列表)
+# 病理类与治疗干预类场景默认 enabled: false
+# ============================================================================
+categories:
+  奖赏类:
+    - reward_anticipation
+    - reward_delivery
+    - reward_omission
+    - reward_extinction
+    - reward_uncertain
+    - reward_contrast
+    - delay_discounting
+    - food_vs_drug_reward
+  应激类:
+    - stress_acute_looming
+    - stress_chronic_unpredictable
+    - stress_restraint
+    - stress_social_defeat
+    - stress_post_restraint_recovery
+    - ptsd_reexperiencing
+    - stress_cold_water
+    - stress_unavoidable_shock
+  社交类:
+    - social_investigation
+    - social_bonding
+    - social_isolation
+    - social_rejection
+    - maternal_bonding
+    - male_aggression
+    - social_hierarchy_dominant
+    - social_hierarchy_subordinate
+    - empathy_pain_observation
+    - mate_choice
+    - inequity_aversion
+    - cooperative_joint_action
+  认知类:
+    - cognitive_attention
+    - cognitive_learning
+    - cognitive_habituation
+    - cognitive_decision
+    - working_memory
+    - reversal_learning
+    - episodic_memory_encoding
+    - episodic_memory_retrieval
+    - risky_decision
+    - motor_learning
+    - novelty_exploration
+    - curiosity_information_seeking
+    - boredom_low_arousal
+  病理类:
+    - addiction_cocaine
+    - addiction_withdrawal
+    - depression_helplessness
+    - fear_conditioning
+    - fear_extinction
+    - meditation_compassion
+    - schizophrenia_positive
+    - schizophrenia_negative
+    - bipolar_mania
+    - bipolar_depression
+    - anxiety_disorder
+    - ocd_checking
+    - adhd_inattentive
+    - autism_social_deficit
+    - alcohol_intoxication
+    - alcohol_withdrawal
+  生理节律类:
+    - sleep_rem
+    - sleep_nrem
+    - circadian_morning
+    - exercise_aerobic
+    - hunger_state
+    - satiety_state
+    - sexual_arousal
+    - mating_act
+    - climax_release
+    - refractory_rest
+  基本情绪类:
+    - disgust_taste_moral
+  情绪调节类:
+    - emotion_reappraisal
+    - emotion_suppression
+    - mindfulness_breathing
+    - emotional_memory_consolidation
+  治疗干预类:
+    - ssri_treatment
+    - benzodiazepine_acute
+    - antipsychotic_d2_block
+    - psilocybin_therapy
+    - mdma_empathogen
+    - deep_brain_stimulation
+  学习记忆类:
+    - fear_reconsolidation
+    - spatial_navigation
+    - procedural_habit
+
+# ============================================================================
+# 脑区参数模板 (同一调质在不同脑区的时间常数/摄取参数不同)
+# 权威依据: Ford 2010 (DA VTA vs striatum), Breton-Provencher 2022 (NE LC)
+# ============================================================================
+brain_regions:
+  VTA:              # 腹侧被盖区 - DA 神经元胞体
+    DA: {decay_tau: 0.500, v_max: 2.0, k_m: 0.4}     # 慢衰减 (扩散为主)
+    GABA: {decay_tau: 0.300, v_max: 3.0, k_m: 0.3}
+  striatum:         # 纹状体 - DA 终末, DAT 高表达
+    DA: {decay_tau: 0.200, v_max: 5.0, k_m: 0.3}     # 快衰减 (DAT 重摄取)
+    ACh: {decay_tau: 0.200, v_max: 8.0, k_m: 0.2}    # AChE 极快降解
+  PFC:              # 前额叶 - 执行控制
+    DA: {decay_tau: 0.300, v_max: 3.0, k_m: 0.35}
+    NE: {decay_tau: 0.500, v_max: 3.0, k_m: 0.4}
+    ACh: {decay_tau: 0.300, v_max: 5.0, k_m: 0.3}
+  amygdala:         # 杏仁核 - 恐惧/情绪
+    NE: {decay_tau: 0.400, v_max: 4.0, k_m: 0.4}
+    5HT: {decay_tau: 2.0, v_max: 2.0, k_m: 0.5}
+    GABA: {decay_tau: 0.250, v_max: 4.0, k_m: 0.3}
+  hippocampus:      # 海马 - 记忆
+    ACh: {decay_tau: 0.250, v_max: 6.0, k_m: 0.25}
+    5HT: {decay_tau: 2.5, v_max: 1.5, k_m: 0.5}
+  hypothalamus:     # 下丘脑 - 催产素
+    Oxy: {decay_tau: 10.0, v_max: 0.5, k_m: 0.6}
+  insula:           # 岛叶 - 厌恶/内感受 (Calder 2001)
+    5HT: {decay_tau: 2.0, v_max: 2.0, k_m: 0.5}
+    DA: {decay_tau: 0.300, v_max: 3.0, k_m: 0.35}
+
+# ============================================================================
+# 基础调质参数 (各场景默认, 可被脑区和场景覆盖)
+# ============================================================================
+base_params:
+  DA:    {rise_tau: 0.050, baseline: 0.0,  noise_std: 0.015}
+  5HT:   {rise_tau: 0.200, baseline: 0.0,  noise_std: 0.012}
+  NE:    {rise_tau: 0.080, baseline: 0.0,  noise_std: 0.018}
+  ACh:   {rise_tau: 0.100, baseline: 0.02, noise_std: 0.010}
+  Oxy:   {rise_tau: 1.000, baseline: 0.01, noise_std: 0.008}
+
+# ============================================================================
+# 强度梯度模板 (peak_df 和 poisson_rate 的缩放因子)
+# ============================================================================
+# ==================== 强度梯度系统 (-50 到 +50) ====================
+# 线性映射: scale = max(0.05, 1.0 + intensity * 0.02)
+#   intensity = -50 → scale = 0.05 (最弱, 钳位防全零)
+#   intensity = -25 → scale = 0.50 (原 weak)
+#   intensity =   0 → scale = 1.00 (基准, 原 medium)
+#   intensity = +25 → scale = 1.50 (原 strong)
+#   intensity = +50 → scale = 2.00 (最强)
+# peak_scale 和 rate_scale 都用同一公式, 保证刺激频率与幅度同步缩放.
+intensity_levels:
+  _mode: linear_integer       # 整数线性映射模式
+  _range: [-50, 50]           # 整数范围
+  _formula: "scale = max(0.05, 1.0 + intensity * 0.02)"
+  # 兼容旧版命名 (代码会自动转换):
+  legacy_weak:   -25          # 等价于 scale=0.5
+  legacy_medium: 0            # 等价于 scale=1.0
+  legacy_strong: 25           # 等价于 scale=1.5
+
+# ============================================================================
+# 阶段模板 (时间结构: baseline → CS → US → recovery)
+# ============================================================================
+phase_templates:
+  default:
+    baseline:  {start: 0,    duration: 10,  description: "基线期"}
+    CS:        {start: 10,   duration: 5,   description: "条件刺激"}
+    US:        {start: 15,   duration: 2,   description: "无条件刺激"}
+    recovery:  {start: 17,   duration: 283, description: "恢复期 (A2: 延长至 300s 总时长)"}
+  fear_conditioning:
+    baseline:  {start: 0,    duration: 10,  description: "基线期"}
+    CS:        {start: 10,   duration: 30,  description: "CS+ 恐惧线索"}
+    US:        {start: 40,   duration: 2,   description: "足底电击"}
+    recovery:  {start: 42,   duration: 258, description: "恢复期 (A2)"}
+  social_defeat:
+    baseline:  {start: 0,    duration: 10,  description: "基线期"}
+    CS:        {start: 10,   duration: 5,   description: "入侵者出现"}
+    US:        {start: 15,   duration: 60,  description: "社交失败"}
+    recovery:  {start: 75,   duration: 225, description: "恢复期 (A2)"}
+  fear_reconsolidation:
+    baseline:  {start: 0,    duration: 10,  description: "基线期"}
+    CS:        {start: 10,   duration: 5,   description: "记忆再激活线索"}
+    US:        {start: 15,   duration: 10,  description: "再巩固窗口 (NE 关键)"}
+    recovery:  {start: 25,   duration: 275, description: "再巩固完成期 (A2)"}
+
+# ============================================================================
+# 72 个场景预设 (22 原有 + 50 新增)
+# ============================================================================
+presets:
+
+  # ==================== 奖赏类 (4) ====================
+
+  reward_anticipation:
+    description: "奖赏预期 - CS+ 出现时 DA 渐升 (Schultz 1997)"
+    paradigm: "Pavlovian conditioning"
+    behavior: "approach_behavior"
+    brain_region: "VTA"
+    expected_state: {pleasure: medium, arousal: medium, dominance: high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.20, 0.35], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 15,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 15,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 20,   phase: recovery}
+
+  reward_delivery:
+    description: "奖赏获得 - US 到达时 DA 尖峰 (Schultz 1997)"
+    paradigm: "Pavlovian conditioning - reward delivery"
+    behavior: "consummatory_behavior"
+    brain_region: "striatum"
+    expected_state: {pleasure: high, arousal: medium, dominance: high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.20,  peak_df: [0.40, 0.60], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 10,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.20, 0.30], stim_duration: 20,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.15], stim_duration: 20,   phase: recovery}
+
+  reward_omission:
+    description: "奖赏遗漏 - 预期但未获得, DA 突降 (Schultz 1997)"
+    paradigm: "Pavlovian conditioning - reward omission"
+    behavior: "frustration_behavior"
+    brain_region: "VTA"
+    expected_state: {pleasure: low, arousal: medium, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.20, 0.35], stim_duration: 15,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.20, 0.30], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.35], stim_duration: 15,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 20,   phase: recovery}
+
+  reward_extinction:
+    description: "奖赏消退 - 重复无奖赏, DA 渐降"
+    paradigm: "Extinction learning"
+    behavior: "extinction_learning"
+    brain_region: "PFC"
+    expected_state: {pleasure: low_medium, arousal: low, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.08, 0.15], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 40,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+
+  # ==================== 应激类 (4) ====================
+
+  stress_acute_looming:
+    description: "急性威胁 - looming 刺激, NE 快速峰值 (Breton-Provencher 2022)"
+    paradigm: "Looming threat"
+    behavior: "freezing_flight"
+    brain_region: "amygdala"
+    expected_state: {pleasure: low, arousal: high, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.05, 0.15], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.30, 0.50], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.20,  peak_df: [0.50, 0.70], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 15,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 20,   phase: recovery}
+
+  stress_chronic_unpredictable:
+    description: "慢性不可预测应激 - 5HT 持续升高 (Willner 2017)"
+    paradigm: "Chronic unpredictable mild stress"
+    behavior: "behavioral_despair"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: very_low, arousal: medium_high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.03, 0.08], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.08,  peak_df: [0.40, 0.60], stim_duration: 90,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.30, 0.45], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 30,   phase: recovery}
+
+  stress_restraint:
+    description: "约束应激 - NE 持续中等升高"
+    paradigm: "Restraint stress"
+    behavior: "struggle_immobility"
+    brain_region: "PFC"
+    expected_state: {pleasure: low, arousal: high, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.20, 0.35], stim_duration: 60,   phase: US}
+      NE:    {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.35, 0.50], stim_duration: 60,   phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.03, 0.08], stim_duration: 30,   phase: recovery}
+
+  stress_social_defeat:
+    description: "社交失败 - DA低 + 5HT高 + Oxy低 (Krishnan 2007)"
+    paradigm: "Social defeat stress"
+    behavior: "social_avoidance"
+    brain_region: "amygdala"
+    phase_template: "social_defeat"
+    expected_state: {pleasure: very_low, arousal: high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.40, 0.60], stim_duration: 60,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.45, 0.65], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 30,   phase: recovery}
+
+  # ==================== 社交类 (4) ====================
+
+  social_investigation:
+    description: "社交探究 - Oxy 中频 burst (Lee 2009)"
+    paradigm: "Social investigation"
+    behavior: "sniffing_approach"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 20,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 20,   phase: CS}
+      Oxy:   {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.20, 0.35], stim_duration: 1.0,  phase: CS}
+
+  social_bonding:
+    description: "社交依恋 - Oxy 持续上升 + DA 中等 (Insel 2010)"
+    paradigm: "Pair bonding"
+    behavior: "pair_bonding"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: high, arousal: low_medium, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.20, 0.30], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.08, 0.12], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.35, 0.50], stim_duration: 60,   phase: US}
+
+  social_isolation:
+    description: "社交隔离 - Oxy 低基线 + DA 低 (Grippo 2007)"
+    paradigm: "Social isolation"
+    behavior: "isolation_distress"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: low, arousal: medium, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.15], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 90,   phase: baseline}
+
+  social_rejection:
+    description: "社交排斥 - DA 突降 + 5HT 上升 (Eisenberger 2003)"
+    paradigm: "Social rejection (Cyberball)"
+    behavior: "social_withdrawal"
+    brain_region: "amygdala"
+    expected_state: {pleasure: very_low, arousal: medium, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.35, 0.55], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.25, 0.35], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 20,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 30,   phase: recovery}
+
+  # ==================== 认知类 (4) ====================
+
+  cognitive_attention:
+    description: "注意力集中 - ACh 持续高 (Sarter 2005)"
+    paradigm: "Sustained attention task"
+    behavior: "attentional_engagement"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.15, 0.25], stim_duration: 20,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.25, 0.40], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.40, 0.60], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 30,   phase: recovery}
+
+  cognitive_learning:
+    description: "学习曲线 - ACh 渐变 (Hasselmo 2006)"
+    paradigm: "Paired-associate learning"
+    behavior: "learning_progression"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium, arousal: high, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.20, 0.30], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 20,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.20, 0.30], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.08,  peak_df: [0.30, 0.50], stim_duration: 90,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.15], stim_duration: 30,   phase: recovery}
+
+  cognitive_habituation:
+    description: "习惯化 - ACh 逐渐降低 (Rankin 2009)"
+    paradigm: "Habituation paradigm"
+    behavior: "habituation_response"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium_low, arousal: low_medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.12, 0.20], stim_duration: 30,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.15, 0.20], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.08, 0.12], stim_duration: 30,   phase: recovery}
+
+  cognitive_decision:
+    description: "决策冲突 - NE 脉冲 + ACh 上升 (Botvinick 2001)"
+    paradigm: "Conflict decision task"
+    behavior: "deliberation_choice"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_low, arousal: high, dominance: medium_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.40, 0.55], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+
+  # ==================== 病理类 (6) ====================
+
+  addiction_cocaine:
+    enabled: false
+    description: "可卡因急性 - DA 超高频 burst (Phillips 2003)"
+    paradigm: "Acute cocaine administration"
+    behavior: "hyperactivity_stereotypy"
+    brain_region: "striatum"
+    expected_state: {pleasure: very_high, arousal: very_high, dominance: very_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.80,  peak_df: [0.80, 1.00], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.12,  peak_df: [0.30, 0.45], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+
+  addiction_withdrawal:
+    enabled: false
+    description: "戒断 - DA低 + 5HT高 + NE高 (Koob 1997)"
+    paradigm: "Drug withdrawal"
+    behavior: "withdrawal_distress"
+    brain_region: "amygdala"
+    expected_state: {pleasure: very_low, arousal: high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.07,  peak_df: [0.45, 0.65], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.12,  peak_df: [0.40, 0.55], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.15], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 30,   phase: baseline}
+
+  depression_helplessness:
+    enabled: false
+    description: "习得性无助 - DA/5HT 双低 (Seligman 1972)"
+    paradigm: "Learned helplessness"
+    behavior: "behavioral_despair"
+    brain_region: "PFC"
+    expected_state: {pleasure: very_low, arousal: low, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.001, peak_df: [0.005, 0.01], stim_duration: 30,   phase: baseline}
+
+  fear_conditioning:
+    enabled: false
+    description: "恐惧条件反射 - CS+ 时 5HT/NE 上升 (LeDoux 2000)"
+    paradigm: "Fear conditioning"
+    behavior: "freezing_behavior"
+    brain_region: "amygdala"
+    phase_template: "fear_conditioning"
+    expected_state: {pleasure: very_low, arousal: very_high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.40, 0.55], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.18,  peak_df: [0.50, 0.70], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 30,   phase: recovery}
+
+  fear_extinction:
+    enabled: false
+    description: "恐惧消退 - Oxy 上升促消退 (Knobloch 2012)"
+    paradigm: "Fear extinction learning"
+    behavior: "extinction_recall"
+    brain_region: "amygdala"
+    expected_state: {pleasure: low_medium, arousal: medium, dominance: medium_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 60,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.25, 0.40], stim_duration: 60,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.30, 0.45], stim_duration: 90,   phase: recovery}
+
+  meditation_compassion:
+    enabled: false
+    description: "慈悲冥想 - Oxy 上升 + DA 中等 (Lutz 2008)"
+    paradigm: "Loving-kindness meditation"
+    behavior: "meditative_state"
+    brain_region: "PFC"
+    expected_state: {pleasure: high, arousal: low, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.12, 0.20], stim_duration: 60,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.08, 0.12], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.35], stim_duration: 90,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 90,   phase: CS}
+
+  # ==================== 奖赏类新增 (4) ====================
+
+  reward_uncertain:
+    description: "不确定奖赏概率 - DA 梯度编码 (Tobler 2005)"
+    paradigm: "Probabilistic reward task"
+    behavior: "approach_uncertainty"
+    brain_region: "VTA"
+    expected_state: {pleasure: medium, arousal: medium_high, dominance: medium}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.20, 0.40], stim_duration: 30,   phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 20,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.18, 0.28], stim_duration: 20,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 20,   phase: recovery}
+
+  reward_contrast:
+    description: "奖赏对比 - DA 相对编码 (价值差异)"
+    paradigm: "Reward contrast paradigm"
+    behavior: "contrast_comparison"
+    brain_region: "striatum"
+    expected_state: {pleasure: medium_high, arousal: medium, dominance: high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.30, 0.50], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 15,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 20,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.15], stim_duration: 20,   phase: recovery}
+
+  delay_discounting:
+    description: "延迟折扣 - DA 时间积分 (Kable 2009)"
+    paradigm: "Intertemporal choice task"
+    behavior: "delayed_choice"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_low, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.20, 0.35], stim_duration: 60,   phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+
+  food_vs_drug_reward:
+    description: "食物 vs 药物奖赏对比 - DA 不同强度编码"
+    paradigm: "Reward type comparison"
+    behavior: "consummatory_contrast"
+    brain_region: "striatum"
+    expected_state: {pleasure: high, arousal: high, dominance: high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.30,  peak_df: [0.50, 0.70], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 20,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.25, 0.40], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.18, 0.28], stim_duration: 20,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 20,   phase: recovery}
+
+  # ==================== 应激类新增 (4) ====================
+
+  stress_post_restraint_recovery:
+    description: "约束后恢复期 - NE/5HT 渐降 DA 缓升"
+    paradigm: "Post-restraint recovery"
+    behavior: "recovery_calm"
+    brain_region: "PFC"
+    expected_state: {pleasure: low_medium, arousal: low_medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.10, 0.18], stim_duration: 0.05, phase: recovery}
+      5HT:   {stim_type: plateau, poisson_rate: 0.04,  peak_df: [0.20, 0.35], stim_duration: 60,   phase: recovery}
+      NE:    {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.18, 0.30], stim_duration: 60,   phase: recovery}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+
+  ptsd_reexperiencing:
+    description: "PTSD 再体验 - NE 突增 + 5HT 失调 (重建侵入性记忆)"
+    paradigm: "Trauma cue re-exposure"
+    behavior: "intrusive_reexperiencing"
+    brain_region: "amygdala"
+    expected_state: {pleasure: very_low, arousal: very_high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.25,  peak_df: [0.55, 0.75], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 20,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 30,   phase: recovery}
+
+  stress_cold_water:
+    description: "冷水应激 - NE 急性上升 + 5HT 中等升高"
+    paradigm: "Cold water swim stress"
+    behavior: "stress_swim"
+    brain_region: "amygdala"
+    expected_state: {pleasure: very_low, arousal: high, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.08, 0.15], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.18,  peak_df: [0.45, 0.65], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.20], stim_duration: 15,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.03, 0.08], stim_duration: 20,   phase: recovery}
+
+  stress_unavoidable_shock:
+    description: "不可逃避电击 - 习得性无助诱导期 (Maier 1976)"
+    paradigm: "Uncontrollable shock (learned helplessness induction)"
+    behavior: "helpless_immobility"
+    brain_region: "PFC"
+    expected_state: {pleasure: very_low, arousal: high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.03, 0.08], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.35, 0.55], stim_duration: 60,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.40, 0.60], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 30,   phase: recovery}
+
+  # ==================== 社交类新增 (6) ====================
+
+  maternal_bonding:
+    description: "母婴依恋 - Oxy 极高 + DA 中等 (Insel 2010)"
+    paradigm: "Maternal bonding"
+    behavior: "maternal_care"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: very_high, arousal: low_medium, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.18, 0.28], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.08,  peak_df: [0.50, 0.70], stim_duration: 90,   phase: CS}
+
+  male_aggression:
+    description: "雄性竞争攻击 - DA/NE 高 5HT 低 (Nelson 2006)"
+    paradigm: "Resident-intruder aggression"
+    behavior: "aggressive_attack"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: medium_low, arousal: very_high, dominance: very_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.12,  peak_df: [0.30, 0.45], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 20,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.35, 0.50], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 20,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: US}
+
+  social_hierarchy_dominant:
+    description: "社会等级-支配者 - DA/5HT 双高 (Raleigh 1991)"
+    paradigm: "Social hierarchy observation"
+    behavior: "dominant_posture"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_high, arousal: medium_high, dominance: very_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.25, 0.40], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.25, 0.40], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.18, 0.28], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: recovery}
+
+  social_hierarchy_subordinate:
+    description: "社会等级-从属者 - DA 低 + 5HT 中 (Raleigh 1991)"
+    paradigm: "Social hierarchy observation"
+    behavior: "subordinate_submission"
+    brain_region: "PFC"
+    expected_state: {pleasure: low, arousal: medium_low, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.04,  peak_df: [0.20, 0.35], stim_duration: 60,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  empathy_pain_observation:
+    description: "共情-观察他人疼痛 - NE/5HT 上升 (Singer 2004)"
+    paradigm: "Pain observation empathy task"
+    behavior: "empathic_concern"
+    brain_region: "amygdala"
+    expected_state: {pleasure: low, arousal: medium_high, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.18], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.04,  peak_df: [0.25, 0.40], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.30, 0.45], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.18, 0.28], stim_duration: 20,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.25, 0.40], stim_duration: 30,   phase: US}
+
+  mate_choice:
+    description: "配偶选择 - DA/Oxy 协同上升 (Curtis 2015)"
+    paradigm: "Mate preference test"
+    behavior: "mate_preference"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: high, arousal: medium_high, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.20, 0.35], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 20,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.18, 0.28], stim_duration: 20,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.35, 0.55], stim_duration: 60,   phase: CS}
+
+  # ==================== 社交类补充 (2, 公平厌恶/合作) ====================
+
+  inequity_aversion:
+    description: "公平厌恶 - 遭遇不公分配, DA 相对预期负向下降 (Fliessbach 2007)"
+    paradigm: "Inequity aversion task"
+    behavior: "reject_unfair_offer"
+    brain_region: "PFC"
+    expected_state: {pleasure: low, arousal: medium, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.04,  peak_df: [0.25, 0.40], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.20, 0.30], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.25, 0.35], stim_duration: 30,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+
+  cooperative_joint_action:
+    description: "合作联合行动 - 双人合作任务, Oxy 中高+DA 协同上升 (Decety 2004)"
+    paradigm: "Cooperative joint action"
+    behavior: "coordinated_interaction"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_high, arousal: medium, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.07,  peak_df: [0.25, 0.40], stim_duration: 60,   phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.12, 0.20], stim_duration: 60,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.15, 0.22], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.22, 0.32], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.30, 0.45], stim_duration: 90,   phase: CS}
+
+  # ==================== 认知类新增 (6) ====================
+
+  working_memory:
+    description: "工作记忆 - PFC DA 倒 U 型最优 (Goldman-Rakic 1995)"
+    paradigm: "Delayed match-to-sample"
+    behavior: "working_memory_engagement"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium, arousal: high, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.20, 0.30], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.25, 0.40], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+
+  reversal_learning:
+    description: "反转学习 - PFC 5HT 关键 (Clarke 2004)"
+    paradigm: "Probabilistic reversal learning"
+    behavior: "rule_switching"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.35, 0.50], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.20, 0.30], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.25, 0.35], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  episodic_memory_encoding:
+    description: "情景记忆编码 - 海马 ACh 上升 (Hasselmo 2006)"
+    paradigm: "Episodic encoding task"
+    behavior: "memory_encoding"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.07,  peak_df: [0.40, 0.55], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  episodic_memory_retrieval:
+    description: "情景记忆提取 - 海马 ACh 下降促回忆 (Hasselmo 2006)"
+    paradigm: "Episodic retrieval task"
+    behavior: "memory_recall"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.18], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+
+  risky_decision:
+    description: "风险决策 - DA 编码风险不确定性 (Fiorillo 2003)"
+    paradigm: "Risk/reward decision task"
+    behavior: "risk_taking"
+    brain_region: "VTA"
+    expected_state: {pleasure: medium_high, arousal: high, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.20, 0.35], stim_duration: 30,   phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.25, 0.40], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+
+  motor_learning:
+    description: "运动技能学习 - 纹状体 DA+ACh 协同 (Doyon 2003)"
+    paradigm: "Motor sequence learning"
+    behavior: "skill_acquisition"
+    brain_region: "striatum"
+    expected_state: {pleasure: medium, arousal: medium_high, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.20, 0.35], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.35, 0.50], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  # ==================== 认知类补充 (3, 新奇/好奇/无聊) ====================
+
+  novelty_exploration:
+    description: "新奇探测 - 全新无关刺激, DA 短暂尖峰后快速回落 (Lisman & Grace 2005)"
+    paradigm: "Novelty exploration"
+    behavior: "orienting_response"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.30, 0.45], stim_duration: 0.10, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 20,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.25, 0.35], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.20, 0.30], stim_duration: 15,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 20,   phase: recovery}
+
+  curiosity_information_seeking:
+    description: "好奇心/信息寻求 - 高不确定性但可解决, DA 渐升直至信息揭示 (Gruber 2014)"
+    paradigm: "Information seeking task"
+    behavior: "exploratory_gaze"
+    brain_region: "VTA"
+    expected_state: {pleasure: medium_high, arousal: medium_high, dominance: medium}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.25, 0.40], stim_duration: 45,   phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.25, 0.40], stim_duration: 45,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  boredom_low_arousal:
+    description: "无聊/低觉醒 - 重复单调环境, NE/DA 持续低位 (Danckert 2018)"
+    paradigm: "Sustained monotony"
+    behavior: "vigilance_decrement"
+    brain_region: "PFC"
+    expected_state: {pleasure: low, arousal: very_low, dominance: low_medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.03, 0.06], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.12, 0.18], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.03, 0.06], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.12], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 90,   phase: baseline}
+
+  # ==================== 病理类新增 (10, 全部 enabled: false) ====================
+
+  schizophrenia_positive:
+    enabled: false
+    description: "精分阳性症状 - 纹状体 DA 过度 (Laruelle 1996)"
+    paradigm: "Positive symptom model"
+    behavior: "hallucination_delusion"
+    brain_region: "striatum"
+    expected_state: {pleasure: high, arousal: very_high, dominance: very_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.60,  peak_df: [0.75, 0.95], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.40, 0.55], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 30,   phase: baseline}
+
+  schizophrenia_negative:
+    enabled: false
+    description: "精分阴性症状 - PFC DA 不足 (Weinberger 1987)"
+    paradigm: "Negative symptom model"
+    behavior: "anhedonia_avolition"
+    brain_region: "PFC"
+    expected_state: {pleasure: very_low, arousal: low, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.001, peak_df: [0.005, 0.01], stim_duration: 30,   phase: baseline}
+
+  bipolar_mania:
+    enabled: false
+    description: "躁狂 - DA/NE 极高 (Goodwin 2007)"
+    paradigm: "Manic episode model"
+    behavior: "hyperactivity_grandiosity"
+    brain_region: "VTA"
+    expected_state: {pleasure: very_high, arousal: very_high, dominance: very_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.55,  peak_df: [0.70, 0.90], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.40,  peak_df: [0.60, 0.80], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  bipolar_depression:
+    enabled: false
+    description: "双相抑郁 - DA/NE 低 + 5HT 低"
+    paradigm: "Bipolar depressive episode"
+    behavior: "psychomotor_retardation"
+    brain_region: "PFC"
+    expected_state: {pleasure: very_low, arousal: low, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.001, peak_df: [0.005, 0.01], stim_duration: 30,   phase: baseline}
+
+  anxiety_disorder:
+    enabled: false
+    description: "焦虑症 - 5HT 失调 + NE 高 + GABA 低 (Graeff 2002)"
+    paradigm: "Anxiety disorder model"
+    behavior: "hypervigilance_avoidance"
+    brain_region: "amygdala"
+    expected_state: {pleasure: low, arousal: high, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.18], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.04,  peak_df: [0.25, 0.40], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.35,  peak_df: [0.55, 0.75], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 30,   phase: baseline}
+
+  ocd_checking:
+    enabled: false
+    description: "强迫症-检查 - 5HT/DA 失调 + 纹状体过度 (Saxena 2001)"
+    paradigm: "Compulsive checking model"
+    behavior: "compulsive_checking"
+    brain_region: "striatum"
+    expected_state: {pleasure: low, arousal: medium_high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.10,  peak_df: [0.25, 0.40], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.18, 0.30], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  adhd_inattentive:
+    enabled: false
+    description: "ADHD 注意不集中 - PFC NE/DA 不足 (Arnsten 2009)"
+    paradigm: "ADHD inattentive model"
+    behavior: "inattention_distractibility"
+    brain_region: "PFC"
+    expected_state: {pleasure: low_medium, arousal: low_medium, dominance: low_medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 60,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.02], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}
+
+  autism_social_deficit:
+    enabled: false
+    description: "自闭症社交缺陷 - Oxy 系统异常 + 5HT 高 (Modahl 1998)"
+    paradigm: "Autism social deficit model"
+    behavior: "social_communication_deficit"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: low, arousal: medium, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.18], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.001, peak_df: [0.005, 0.01], stim_duration: 60,   phase: CS}
+
+  alcohol_intoxication:
+    enabled: false
+    description: "酒精中毒 - GABA 增强 + DA 上升 (Vengeliene 2008)"
+    paradigm: "Acute alcohol intoxication"
+    behavior: "intoxicated_disinhibition"
+    brain_region: "striatum"
+    expected_state: {pleasure: medium_high, arousal: low_medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.35, 0.50], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+
+  alcohol_withdrawal:
+    enabled: false
+    description: "酒精戒断 - GABA 急降 + NE/5HT 高 (Becker 2009)"
+    paradigm: "Alcohol withdrawal syndrome"
+    behavior: "withdrawal_agitation"
+    brain_region: "amygdala"
+    expected_state: {pleasure: very_low, arousal: very_high, dominance: very_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.35, 0.55], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.40, 0.55], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 30,   phase: baseline}
+
+  # ==================== 生理节律类新增 (7, 全部 enabled: true) ====================
+
+  sleep_rem:
+    description: "REM 睡眠 - ACh 极高 NE/5HT 极低 (Hobson 1975)"
+    paradigm: "REM sleep phase"
+    behavior: "rem_sleep"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium, arousal: low, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.01, 0.03], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.08,  peak_df: [0.50, 0.70], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  sleep_nrem:
+    description: "慢波睡眠 - ACh 低 NE/5HT 中 (Steriade 2000)"
+    paradigm: "NREM slow-wave sleep"
+    behavior: "slow_wave_sleep"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_low, arousal: very_low, dominance: medium_low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.08, 0.12], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.03, 0.08], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  circadian_morning:
+    description: "昼夜节律-早晨 - DA 渐升 + 5HT/NE 协同 (Schwartz 1986)"
+    paradigm: "Circadian morning phase"
+    behavior: "morning_arousal"
+    brain_region: "VTA"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  exercise_aerobic:
+    description: "有氧运动 - DA/5HT 双升 runner's high (Boecker 2008)"
+    paradigm: "Aerobic exercise"
+    behavior: "sustained_running"
+    brain_region: "VTA"
+    expected_state: {pleasure: high, arousal: high, dominance: high}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.25, 0.40], stim_duration: 90,   phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.25, 0.40], stim_duration: 90,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.25, 0.40], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 60,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 60,   phase: recovery}
+
+  hunger_state:
+    description: "饥饿状态 - DA 上升 + Oxy 中等 (Rolls 1981)"
+    paradigm: "Food deprivation hunger state"
+    behavior: "food_seeking"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: low_medium, arousal: medium_high, dominance: medium}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.20, 0.30], stim_duration: 90,   phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  satiety_state:
+    description: "饱食状态 - 5HT 上升 + DA 低 (Halford 2007)"
+    paradigm: "Post-prandial satiety"
+    behavior: "post_prandial_rest"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: medium_high, arousal: low, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.25, 0.40], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.08, 0.12], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+
+  sexual_arousal:
+    description: "性唤起 - DA/Oxy 协同上升 (Murphy 2007)"
+    paradigm: "Sexual arousal paradigm"
+    behavior: "sexual_approach"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: high, arousal: high, dominance: high}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.08,  peak_df: [0.30, 0.45], stim_duration: 90,   phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.06,  peak_df: [0.18, 0.28], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 60,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.07,  peak_df: [0.40, 0.60], stim_duration: 90,   phase: US}
+
+  # ==================== 生理节律类补充 (3, 交配/高潮/不应期) ====================
+
+  mating_act:
+    description: "交配行为 - DA/Oxy 持续上升至平台, ACh 中等 (Baskerville 2006)"
+    paradigm: "Sexual behavior progression"
+    behavior: "mating_behavior"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: high, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: ramp,    poisson_rate: 0.10,  peak_df: [0.40, 0.60], stim_duration: 90,   phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.25, 0.40], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.25, 0.35], stim_duration: 60,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.10,  peak_df: [0.50, 0.75], stim_duration: 90,   phase: US}
+
+  climax_release:
+    description: "高潮释放 - DA/Oxy 爆发性尖峰, NE 急升后快速回落 (Komisaruk 2006)"
+    paradigm: "Orgasmic response"
+    behavior: "climax_response"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: very_high, arousal: very_high, dominance: high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.50,  peak_df: [0.70, 0.90], stim_duration: 0.20, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.08, 0.15], stim_duration: 30,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.40,  peak_df: [0.60, 0.80], stim_duration: 0.10, phase: US}
+      ACh:   {stim_type: pulse,   poisson_rate: 0.20,  peak_df: [0.40, 0.60], stim_duration: 0.20, phase: US}
+      Oxy:   {stim_type: pulse,   poisson_rate: 0.30,  peak_df: [0.60, 0.80], stim_duration: 1.0,  phase: US}
+
+  refractory_rest:
+    description: "不应期 - 高潮后 DA/Oxy 急降, 5HT 中等升高 (Krüger 2002)"
+    paradigm: "Post-orgasmic refractory"
+    behavior: "post_copulatory_rest"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: medium_low, arousal: very_low, dominance: low_medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.005, peak_df: [0.02, 0.04], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.08, 0.12], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+
+  # ==================== 基本情绪类新增 (1, 厌恶) ====================
+
+  disgust_taste_moral:
+    description: "厌恶(味觉/道德) - 5HT 上升, DA/NE 抑制, 心率下降 (Calder 2001)"
+    paradigm: "Disgust induction (gustatory/moral)"
+    behavior: "rejection_withdrawal"
+    brain_region: "insula"
+    expected_state: {pleasure: very_low, arousal: medium_low, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.02, 0.05], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.06,  peak_df: [0.40, 0.60], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.01,  peak_df: [0.03, 0.06], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 20,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.005, peak_df: [0.02, 0.05], stim_duration: 30,   phase: recovery}
+
+  # ==================== 情绪调节类新增 (4, 全部 enabled: true) ====================
+
+  emotion_reappraisal:
+    description: "认知重评 - PFC DA/ACh 调节杏仁核反应 (Ochsner 2002)"
+    paradigm: "Cognitive reappraisal task"
+    behavior: "emotional_downregulation"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.05,  peak_df: [0.30, 0.45], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+
+  emotion_suppression:
+    description: "情绪抑制 - NE 抑制 + ACh 上升 (用 NE 间接表示 GABA 增强) (Gross 2002)"
+    paradigm: "Expressive suppression task"
+    behavior: "emotion_suppression"
+    brain_region: "PFC"
+    expected_state: {pleasure: low_medium, arousal: medium_high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.08, 0.15], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.25, 0.35], stim_duration: 30,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  mindfulness_breathing:
+    description: "正念呼吸 - NE 降低 + 5HT 稳定 + Oxy 中升 (Tang 2015)"
+    paradigm: "Mindfulness breathing meditation"
+    behavior: "mindful_awareness"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_high, arousal: low, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.25, 0.35], stim_duration: 90,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 90,   phase: baseline}
+
+  emotional_memory_consolidation:
+    description: "情绪记忆巩固 - NE+ACh 协同增强长期记忆 (McGaugh 2004)"
+    paradigm: "Emotional memory consolidation"
+    behavior: "memory_consolidation"
+    brain_region: "amygdala"
+    expected_state: {pleasure: low_medium, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 60,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.12,  peak_df: [0.30, 0.45], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.35, 0.50], stim_duration: 60,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+
+  # ==================== 治疗干预类新增 (6, 全部 enabled: false 病理相关) ====================
+
+  ssri_treatment:
+    enabled: false
+    description: "SSRI 治疗 - 5HT 急性升+慢性适应 (Kroeze 2012)"
+    paradigm: "SSRI pharmacotherapy"
+    behavior: "antidepressant_response"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.18], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.08,  peak_df: [0.45, 0.65], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+
+  benzodiazepine_acute:
+    enabled: false
+    description: "苯二氮卓急性 - GABA-A 增强 (DA/NE 抑制) (Nutt 2005)"
+    paradigm: "Acute benzodiazepine administration"
+    behavior: "anxiolytic_sedation"
+    brain_region: "amygdala"
+    expected_state: {pleasure: medium, arousal: low, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: baseline}
+
+  antipsychotic_d2_block:
+    enabled: false
+    description: "抗精神病药 - D2 阻断 + 5HT 中升 (Kapur 2001)"
+    paradigm: "Antipsychotic D2 blockade"
+    behavior: "antipsychotic_normalization"
+    brain_region: "striatum"
+    expected_state: {pleasure: low_medium, arousal: low_medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.02,  peak_df: [0.05, 0.10], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.15], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: baseline}
+
+  psilocybin_therapy:
+    enabled: false
+    description: "裸盖菇素治疗 - 5HT2A 激动 + DA 中升 (Carhart-Harris 2018)"
+    paradigm: "Psilocybin-assisted therapy"
+    behavior: "psychedelic_experience"
+    brain_region: "PFC"
+    expected_state: {pleasure: medium_high, arousal: high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.05, phase: baseline}
+      5HT:   {stim_type: plateau, poisson_rate: 0.10,  peak_df: [0.55, 0.75], stim_duration: 90,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: baseline}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: baseline}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: baseline}
+
+  mdma_empathogen:
+    enabled: false
+    description: "MDMA - 5HT/DA/Oxy 大量释放 (Hysek 2013)"
+    paradigm: "MDMA administration (empathogen)"
+    behavior: "empathogenic_prosocial"
+    brain_region: "hypothalamus"
+    expected_state: {pleasure: very_high, arousal: high, dominance: medium_high}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.20,  peak_df: [0.45, 0.65], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.15,  peak_df: [0.60, 0.80], stim_duration: 90,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.35, 0.50], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: US}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.08,  peak_df: [0.45, 0.65], stim_duration: 90,   phase: US}
+
+  deep_brain_stimulation:
+    enabled: false
+    description: "DBS 深部脑刺激 - 局部 DA 调节 (Mayberg 2005)"
+    paradigm: "Deep brain stimulation"
+    behavior: "dbs_stimulation_response"
+    brain_region: "VTA"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.35, 0.50], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+      NE:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  # ==================== 学习记忆类新增 (3, 全部 enabled: true) ====================
+
+  fear_reconsolidation:
+    description: "恐惧记忆再巩固 - NE 关键窗口 (Nader 2000)"
+    paradigm: "Fear memory reconsolidation"
+    behavior: "memory_update"
+    brain_region: "amygdala"
+    phase_template: "fear_reconsolidation"
+    expected_state: {pleasure: very_low, arousal: high, dominance: low}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.04,  peak_df: [0.20, 0.30], stim_duration: 30,   phase: US}
+      NE:    {stim_type: pulse,   poisson_rate: 0.15,  peak_df: [0.40, 0.55], stim_duration: 0.08, phase: US}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.25, 0.35], stim_duration: 30,   phase: recovery}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.03,  peak_df: [0.15, 0.25], stim_duration: 30,   phase: recovery}
+
+  spatial_navigation:
+    description: "空间导航 - 海马 ACh 上升 + 5HT 中等 (Buzsaki 2005)"
+    paradigm: "Spatial navigation task (Morris water maze)"
+    behavior: "spatial_exploration"
+    brain_region: "hippocampus"
+    expected_state: {pleasure: medium, arousal: medium_high, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.04,  peak_df: [0.12, 0.20], stim_duration: 0.05, phase: CS}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 60,   phase: CS}
+      NE:    {stim_type: pulse,   poisson_rate: 0.05,  peak_df: [0.15, 0.25], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.06,  peak_df: [0.35, 0.50], stim_duration: 90,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 30,   phase: recovery}
+
+  procedural_habit:
+    description: "习惯形成 - 纹状体 DA+ACh (Yin 2016)"
+    paradigm: "Procedural habit learning"
+    behavior: "habit_formation"
+    brain_region: "striatum"
+    expected_state: {pleasure: medium, arousal: medium, dominance: medium}
+    modulators:
+      DA:    {stim_type: pulse,   poisson_rate: 0.08,  peak_df: [0.20, 0.35], stim_duration: 0.05, phase: US}
+      5HT:   {stim_type: plateau, poisson_rate: 0.02,  peak_df: [0.10, 0.18], stim_duration: 60,   phase: baseline}
+      NE:    {stim_type: pulse,   poisson_rate: 0.03,  peak_df: [0.10, 0.18], stim_duration: 0.08, phase: CS}
+      ACh:   {stim_type: ramp,    poisson_rate: 0.04,  peak_df: [0.25, 0.35], stim_duration: 60,   phase: CS}
+      Oxy:   {stim_type: ramp,    poisson_rate: 0.01,  peak_df: [0.05, 0.10], stim_duration: 30,   phase: recovery}

@@ -185,6 +185,9 @@ __global__ void stdp_dual_trace_kernel(
     const float* __restrict__ ach_conc,
     const float* __restrict__ ne_conc,
     const float* __restrict__ ht5_conc,
+    const float* __restrict__ gaba_conc,             // Phase 3a: GABA 抑制可塑性门控
+    const float* __restrict__ oxytocin_conc,         // Phase 3a: 催产素增强社交可塑性
+    const uint8_t* __restrict__ oxytocin_receptor,   // Phase 3a: 按突触索引查表 (uint8 定点 /127)
     const float* __restrict__ eligibility,           // 闭环修复: 突触级 e1 trace
     const float* __restrict__ neuron_eligibility,    // 闭环修复: 神经元级 eligibility (按 post 索引)
     int n_synapses,
@@ -228,17 +231,24 @@ __global__ void stdp_dual_trace_kernel(
     // ----- 4. 应用 PSW 权重更新 -----
     // E0 消融: 纯 STDP (M_ij=1, plasticity_factor=1)
     // P2 完整: Δw_final = η · STDP_delta · M_ij(t) · plasticity_factor
-    //   M_ij = σ(da_receptor·DA + ach_receptor·ACh + ne_receptor·NE + ht5_receptor·5HT)
+    //   Phase 3a 扩充: 6 维调质向量
+    //   M_ij = σ(da_rec·DA + ach_rec·ACh + ne_rec·NE + ht5_rec·5HT
+    //             - gaba_rec·GABA           // GABA 抑制可塑性门控 (抗焦虑保护)
+    //             + oxy_rec·Oxytocin)       // 催产素增强社交相关可塑性 (共情驱动)
     //   plasticity_factor = 1.0 - 0.5·autophosph (CaMKII 巩固)
     float M_ij, plasticity_factor;
     if (g_e0_ablation) {
         M_ij = 1.0f;
         plasticity_factor = 1.0f;
     } else {
+        // Phase 3a: 6 维调质门控 (催产素受体按突触索引查表, BioSynapse 无空闲字节)
+        float oxy_rec = static_cast<float>(oxytocin_receptor[i]) / 127.0f;
         M_ij = 1.0f / (1.0f + expf(-(s.da_receptor * da_conc[post]
                                      + s.ach_receptor * ach_conc[post]
                                      + get_ne_receptor(s) * ne_conc[post]
-                                     + get_ht5_receptor(s) * ht5_conc[post])));
+                                     + get_ht5_receptor(s) * ht5_conc[post]
+                                     - get_gaba_receptor(s) * gaba_conc[post]
+                                     + oxy_rec * oxytocin_conc[post])));
         plasticity_factor = 1.0f - 0.5f * s.camkii_autophosph;
     }
 
@@ -309,6 +319,9 @@ __global__ void stdp_arrival_pre_kernel(
     const float* __restrict__ ach_conc,
     const float* __restrict__ ne_conc,
     const float* __restrict__ ht5_conc,
+    const float* __restrict__ gaba_conc,             // Phase 3a: GABA 抑制可塑性门控
+    const float* __restrict__ oxytocin_conc,         // Phase 3a: 催产素增强社交可塑性
+    const uint8_t* __restrict__ oxytocin_receptor,   // Phase 3a: 按突触索引查表
     const float* __restrict__ eligibility,           // 闭环修复: 突触级 e1 trace
     const float* __restrict__ neuron_eligibility,    // 闭环修复: 神经元级 eligibility
     int arrived_ring_idx,
@@ -331,15 +344,19 @@ __global__ void stdp_arrival_pre_kernel(
     s.last_pre_spike = static_cast<float>(step);
 
     // P2: 三因素调制 (E0 消融模式下跳过)
+    // Phase 3a: 6 维调质门控 (与 stdp_dual_trace_kernel 一致)
     float M_ij, plasticity_factor;
     if (g_e0_ablation) {
         M_ij = 1.0f;
         plasticity_factor = 1.0f;
     } else {
+        float oxy_rec = static_cast<float>(oxytocin_receptor[syn_idx]) / 127.0f;
         M_ij = 1.0f / (1.0f + expf(-(s.da_receptor * da_conc[post]
                                      + s.ach_receptor * ach_conc[post]
                                      + get_ne_receptor(s) * ne_conc[post]
-                                     + get_ht5_receptor(s) * ht5_conc[post])));
+                                     + get_ht5_receptor(s) * ht5_conc[post]
+                                     - get_gaba_receptor(s) * gaba_conc[post]
+                                     + oxy_rec * oxytocin_conc[post])));
         plasticity_factor = 1.0f - 0.5f * s.camkii_autophosph;
     }
 
@@ -492,6 +509,9 @@ void launch_stdp_dual_trace(MemoryAllocator* alloc, int step, float plasticity_g
         b.d_ach_concentration,
         b.d_ne_concentration,
         b.d_ht5_concentration,
+        b.d_gaba_concentration,        // Phase 3a
+        b.d_oxytocin_concentration,    // Phase 3a
+        b.d_oxytocin_receptor,         // Phase 3a
         b.d_eligibility,            // 闭环修复: 突触级 e1 trace
         b.d_neuron_eligibility,     // 闭环修复: 神经元级 eligibility
         N_TOTAL_SYNAPSES_2E,
@@ -511,6 +531,9 @@ void launch_stdp_dual_trace(MemoryAllocator* alloc, int step, float plasticity_g
             b.d_ach_concentration,
             b.d_ne_concentration,
             b.d_ht5_concentration,
+            b.d_gaba_concentration,        // Phase 3a
+            b.d_oxytocin_concentration,    // Phase 3a
+            b.d_oxytocin_receptor,         // Phase 3a
             b.d_eligibility,            // 闭环修复: 突触级 e1 trace
             b.d_neuron_eligibility,     // 闭环修复: 神经元级 eligibility
             arrived_ring_idx,

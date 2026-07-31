@@ -601,13 +601,29 @@ void BioMechanismScheduler::step(int current_step) {
         if (!e0_ablation && !is_sleeping_) {
             launch_modulatory(current_step);
             launch_scaling(current_step);
-            // P0 修复: 同步 modulatory 系统的 DA/ACh 浓度到 stats_ (供共激活采样和 Task 18 使用)
-            // NetworkStats2e.da_level/ach_level 原本从未被赋值, 导致 modulator_score=0
-            ModulatoryStats mod_stats = get_modulatory_stats(alloc_);
-            stats_.da_level  = mod_stats.da_mean;
-            stats_.ach_level = mod_stats.ach_mean;
-            stats_.ne_level  = mod_stats.ne_mean;
-            stats_.ht5_level = mod_stats.ht5_mean;
+            // Phase 3a: 用 get_affective_state 替代 get_modulatory_stats
+            //   一次性获取 6 维调质均值 + PAD 情感模型 + LLM 调制信号
+            //   内部已调用 get_modulatory_stats, 无额外开销
+            AffectiveState aff = get_affective_state(alloc_, current_step);
+            stats_.da_level       = aff.dopamine;
+            stats_.ach_level      = aff.acetylcholine;
+            stats_.ne_level       = aff.norepinephrine;
+            stats_.ht5_level      = aff.serotonin;
+            stats_.gaba_level     = aff.gaba;
+            stats_.oxytocin_level = aff.oxytocin;
+            stats_.pleasure       = aff.pleasure;
+            stats_.arousal        = aff.arousal;
+            stats_.dominance      = aff.dominance;
+            stats_.temperature_delta = aff.temperature_delta;
+            stats_.empathy_level  = aff.empathy_level;
+            // Phase 3a: 每 100 步输出情感轨迹日志 (供训练分析与可视化)
+            printf("[Affective] step=%6d  DA=%.3f ACh=%.3f NE=%.3f 5HT=%.3f GABA=%.3f Oxy=%.3f  | "
+                   "P=%+.3f A=%+.3f D=%+.3f  | temp_delta=%+.3f empathy=%.3f confidence=%.3f\n",
+                   current_step,
+                   aff.dopamine, aff.acetylcholine, aff.norepinephrine,
+                   aff.serotonin, aff.gaba, aff.oxytocin,
+                   aff.pleasure, aff.arousal, aff.dominance,
+                   aff.temperature_delta, aff.empathy_level, aff.confidence);
         }
         launch_wm_update(current_step);
     }

@@ -19,6 +19,12 @@
 #include "modulatory_kernels.cuh"
 #include "synapse_kernels.cuh"
 #include "run_config.h"
+#include "event_scheduler.h"
+#include "embodied_body.h"
+#include "embodied_env.h"
+#include "embodied_motor.h"
+#include "multi_sensory_inject.cuh"
+#include "motor_teacher.cuh"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -89,6 +95,8 @@ static void print_experiment_metadata(FILE* fp, const char* prefix,
     emit_run_param(fp, prefix, "decode_lr", "%.6f", config.decode_lr);
     emit_run_param(fp, prefix, "eval_mode", "%d", config.eval_mode ? 1 : 0);
     emit_run_param(fp, prefix, "eval_text_path", "%s", config.eval_text_path.c_str());
+    emit_run_param(fp, prefix, "event_stream_enabled", "%d", config.event_stream_enabled ? 1 : 0);
+    emit_run_param(fp, prefix, "event_stream_path", "%s", config.event_stream_path.c_str());
     emit_run_param(fp, prefix, "csv_enabled", "%d", csv_enabled ? 1 : 0);
     emit_run_param(fp, prefix, "csv_path", "%s", csv_path ? csv_path : "");
     emit_run_param(fp, prefix, "log_interval", "%d", LOG_INTERVAL_2E);
@@ -204,6 +212,8 @@ static void print_experiment_metadata(FILE* fp, const char* prefix,
     emit_run_param(fp, prefix, "ach_tau", "%.6f", ACH_TAU);
     emit_run_param(fp, prefix, "ne_tau", "%.6f", NE_TAU);
     emit_run_param(fp, prefix, "ht5_tau", "%.6f", HT5_TAU);
+    emit_run_param(fp, prefix, "gaba_tau", "%.6f", GABA_TAU);             // Phase 3a
+    emit_run_param(fp, prefix, "oxytocin_tau", "%.6f", OXYTOCIN_TAU);     // Phase 3a
     emit_run_param(fp, prefix, "w_value_dim", "%d", W_VALUE_DIM);
     emit_run_param(fp, prefix, "w_pred_dim", "%d", W_PRED_DIM);
     emit_run_param(fp, prefix, "td_gamma", "%.6f", TD_GAMMA);
@@ -789,12 +799,46 @@ int main(int argc, char** argv) {
                 print_experiment_metadata(csv_fp, "# ", config, true, csv_path, &prop);
                 fprintf(csv_fp, "step,spikes,is_inject_step,byte,nmda_sum,nmda_nz,"
                             "xpre_sum,xpre_nz,ca_sum,ca_nz,weight_mean,weight_abs_mean,"
-                            "weight_min,weight_max,arrived_events,dispatched_events,dropped_events,max_slot_depth\n");
+                            "weight_min,weight_max,arrived_events,dispatched_events,dropped_events,max_slot_depth");
+                if (config.embodied_mode) {
+                    fprintf(csv_fp, ",hunger,temp,comfort,fatigue,arousal,cry,reward,mom_present");
+                }
+                fprintf(csv_fp, "\n");
             }
         }
     }
 
     printf("\n[P1] 开始 %d 步快时间尺度测试...\n\n", total_steps);
+
+    // --- Phase 3a-C1: 事件驱动调质注入 ---
+    // 加载 events.jsonl, 每 100 步 (launch_modulatory 间隔) 派发到期事件
+    // 派发在 scheduler.step() 之前, 确保事件信号被当次 launch_modulatory 读取
+    stage2e::EventScheduler event_scheduler;
+    bool event_stream_active = false;
+    if (config.event_stream_enabled) {
+        if (event_scheduler.load_jsonl(config.event_stream_path)) {
+            event_stream_active = true;
+            printf("[P1] 事件流已启用: %zu 个事件, 文件=%s\n",
+                   event_scheduler.total_events(), config.event_stream_path.c_str());
+        } else {
+            fprintf(stderr, "[P1 WARN] 事件流加载失败, 将以无事件模式继续: %s\n",
+                    config.event_stream_path.c_str());
+        }
+    }
+
+    // --- Phase 3a-D1: 具身发育环境初始化 ---
+    stage2e::EmbodiedEnvironment embodied_env;
+    bool embodied_active = config.embodied_mode;
+    stage2e::MotorReadout motor_readout = {};
+    float sensory_signals[50] = {0};
+    float embodied_reward = 0.0f;
+    if (embodied_active) {
+        embodied_env.init(config.embodied_scene);
+        printf("[P1] 具身发育模式已启用: 场景=%s\n", config.embodied_scene.c_str());
+        printf("[P1]   初始状态: hunger=%.2f temp=%.2f comfort=%.2f fatigue=%.2f arousal=%.2f\n",
+               embodied_env.body.hunger, embodied_env.body.temperature,
+               embodied_env.body.comfort, embodied_env.body.fatigue, embodied_env.body.arousal);
+    }
 
     for (int step = start_step; step < total_steps; ++step) {
         // ==================== Task D3: BPE 输入注入 ====================
@@ -809,6 +853,52 @@ int main(int argc, char** argv) {
                                         scheduler.d_gate_states_for_inject());
             // 设置 BPTT target token (供 BPTT backward 使用, 须在 step() 之前设置)
             scheduler.set_bptt_target_token(token);
+        }
+
+        // Phase 3a-C1: 事件驱动调质注入 — 在 scheduler.step() 之前派发到期事件
+        // 事件信号写入 h_event_signal[6], 由 scheduler.step() 内的 launch_modulatory 读取
+        if (event_stream_active) {
+            event_scheduler.dispatch_pending(step);
+        }
+
+        // ==================== Phase 3a-D1: 每100步环境闭环 ====================
+        // 时序: 环境步在 scheduler.step() 之前执行
+        //   1. 感知注入 (当前身体状态 → 50柱信号 → L4层 input_current)
+        //   2. 动作读出 (上一环境步的运动皮层 spike → 5动作概率)
+        //   3. 环境响应 + 身体演化 (动作 → 妈妈响应 → 身体状态更新)
+        //   4. DA奖励计算 (身体状态改善 → reward → set_embodied_reward)
+        //   5. 行为模仿教师信号 (基因硬编码: hunger>0.6→教CRY)
+        bool is_env_step = (step > 0 && step % 100 == 0);
+        if (is_env_step && embodied_active) {
+            // 1. 感知注入
+            embodied_env.compute_sensory_signals(sensory_signals);
+            stage2e::launch_multi_sensory_inject(
+                sensory_signals,
+                allocator.buffers().d_input_current,
+                scheduler.d_gate_states_for_inject());
+
+            // 2. 动作读出 (上一环境步的运动皮层输出)
+            motor_readout = stage2e::read_motor_output(
+                allocator.buffers().d_motor_spike_flags);
+
+            // 3. 环境响应 + 身体演化
+            stage2e::BodyState prev_body = embodied_env.get_body_state();
+            embodied_env.step_env(motor_readout);
+
+            // 4. DA奖励计算
+            embodied_reward = embodied_env.compute_reward(prev_body);
+            stage2e::set_embodied_reward(embodied_reward);
+
+            // 5. 行为模仿教师信号
+            int target_action = embodied_env.get_teacher_signal();
+            stage2e::launch_motor_teacher(target_action, 0.01f);
+
+            // 6. 日志
+            printf("[EMBODIED step=%d] hunger=%.2f comfort=%.2f arousal=%.2f cry=%.2f suck=%.2f reward=%.4f mom=%s\n",
+                   step, embodied_env.body.hunger, embodied_env.body.comfort,
+                   embodied_env.body.arousal, motor_readout.cry_intensity,
+                   motor_readout.suck_strength, embodied_reward,
+                   embodied_env.mom_present ? "YES" : "no");
         }
 
         scheduler.step(step);
@@ -864,7 +954,7 @@ int main(int argc, char** argv) {
             bool is_inject = (step % INPUT_INJECT_INTERVAL == 0);
             uint8_t byte = is_inject ? stage2e::get_byte_for_step(step) : 0;
 
-            fprintf(csv_fp, "%d,%d,%d,%d,%.4f,%d,%.4f,%d,%.4f,%d,%.6f,%.6f,%.6f,%.6f,%lld,%lld,%lld,%d\n",
+            fprintf(csv_fp, "%d,%d,%d,%d,%.4f,%d,%.4f,%d,%.4f,%d,%.6f,%.6f,%.6f,%.6f,%lld,%lld,%lld,%d",
                     step, scheduler.stats().total_spikes,
                     (int)is_inject, (int)byte,
                     nmda_sum, nmda_nz,
@@ -875,6 +965,15 @@ int main(int argc, char** argv) {
                     scheduler.dispatched_events_accum(),
                     scheduler.dropped_events_accum(),
                     scheduler.max_delay_slot_depth());
+            // Phase 3a-D1: 具身状态追加到CSV
+            if (embodied_active) {
+                fprintf(csv_fp, ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d",
+                        embodied_env.body.hunger, embodied_env.body.temperature,
+                        embodied_env.body.comfort, embodied_env.body.fatigue,
+                        embodied_env.body.arousal, motor_readout.cry_intensity,
+                        embodied_reward, embodied_env.mom_present ? 1 : 0);
+            }
+            fprintf(csv_fp, "\n");
         }
 
         // P1 安全检查: 每 1000 步同步一次, 检测 kernel 错误

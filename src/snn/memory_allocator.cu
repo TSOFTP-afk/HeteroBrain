@@ -89,11 +89,15 @@ size_t MemoryAllocator::allocate_all() {
     d_bufs_.d_nmda_post_state   = alloc<float2>(N_TOTAL_NEURONS_2E, "d_nmda_post_state", &total);
     d_bufs_.d_inhibitory_current = alloc<float>(N_TOTAL_NEURONS_2E, "d_inhibitory_current", &total);
 
-    // --- 调质浓度 ---
-    d_bufs_.d_da_concentration  = alloc<float>(N_TOTAL_NEURONS_2E, "d_da_concentration", &total);
-    d_bufs_.d_ach_concentration = alloc<float>(N_TOTAL_NEURONS_2E, "d_ach_concentration", &total);
-    d_bufs_.d_ne_concentration  = alloc<float>(N_TOTAL_NEURONS_2E, "d_ne_concentration", &total);
-    d_bufs_.d_ht5_concentration = alloc<float>(N_TOTAL_NEURONS_2E, "d_ht5_concentration", &total);
+    // --- 调质浓度 (Phase 3a: 6 维) ---
+    d_bufs_.d_da_concentration      = alloc<float>(N_TOTAL_NEURONS_2E, "d_da_concentration", &total);
+    d_bufs_.d_ach_concentration     = alloc<float>(N_TOTAL_NEURONS_2E, "d_ach_concentration", &total);
+    d_bufs_.d_ne_concentration      = alloc<float>(N_TOTAL_NEURONS_2E, "d_ne_concentration", &total);
+    d_bufs_.d_ht5_concentration     = alloc<float>(N_TOTAL_NEURONS_2E, "d_ht5_concentration", &total);
+    d_bufs_.d_gaba_concentration    = alloc<float>(N_TOTAL_NEURONS_2E, "d_gaba_concentration", &total);
+    d_bufs_.d_oxytocin_concentration= alloc<float>(N_TOTAL_NEURONS_2E, "d_oxytocin_concentration", &total);
+    // Phase 3a: 催产素受体密度 (按突触索引, 仅 SocialBonding 子集非零)
+    d_bufs_.d_oxytocin_receptor     = alloc<uint8_t>(N_TOTAL_SYNAPSES_2E, "d_oxytocin_receptor", &total);
 
     // --- v3 强化 C: 海马体索引 ---
     d_bufs_.d_hippo_indices     = alloc<HippoIndex>(HIPP_INDEX_SIZE, "d_hippo_indices", &total);
@@ -219,6 +223,9 @@ void MemoryAllocator::free_all() {
     FREE_PTR(d_bufs_.d_ach_concentration);
     FREE_PTR(d_bufs_.d_ne_concentration);
     FREE_PTR(d_bufs_.d_ht5_concentration);
+    FREE_PTR(d_bufs_.d_gaba_concentration);
+    FREE_PTR(d_bufs_.d_oxytocin_concentration);
+    FREE_PTR(d_bufs_.d_oxytocin_receptor);
     FREE_PTR(d_bufs_.d_hippo_indices);
     // Task 3: 海马 LRU 游标 + filled_count + top-K 缓冲释放
     FREE_PTR(d_bufs_.d_hippo_write_cursor);

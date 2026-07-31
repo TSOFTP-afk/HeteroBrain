@@ -140,6 +140,14 @@ void set_empathy_signal(float empathy_signal);
 //   优先级: h_event_signal > h_empathy_signal (empathy 作为 Oxy 通道 fallback)
 void set_event_signal(const float modulator_delta[6], int duration_steps);
 
+// Phase 3a-D1: 具身训练 reward + curiosity 接口
+//   set_embodied_reward: 覆盖 launch_da_value_function 中的外部 reward
+//   set_curiosity_ach: 持续 ACh 增量 (好奇心驱动), 叠加到 launch_modulatory 的 ACh 通道
+void set_embodied_reward(float reward);
+void set_curiosity_ach(float pred_error);
+float get_last_embodied_reward();
+float get_last_curiosity_ach();
+
 } // namespace stage2e
 
 #endif // SNN_STAGE2E_MODULATORY_KERNELS_CUH

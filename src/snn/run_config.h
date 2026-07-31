@@ -35,6 +35,12 @@ struct RunConfig {
     float bptt_surrogate_alpha = 4.0f;  // 代理梯度 sigmoid 斜率
     std::string input_mode = "bpe";     // 输入模式: "bpe" (默认) 或 "byte"
     std::string bpe_data_path;          // BPE 数据文件路径 (.bin)
+    // ==================== Phase 3a-C1: 事件驱动调质注入 ====================
+    bool event_stream_enabled = false;
+    std::string event_stream_path;      // --event-stream PATH
+    // ==================== Phase 3a-D1: 具身发育训练 ====================
+    bool embodied_mode = false;
+    std::string embodied_scene = "hunger_feeding";  // 默认场景
 };
 
 bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* error);

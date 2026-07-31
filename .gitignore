@@ -58,6 +58,10 @@ data/*.bin
 !data/README.md
 !data/.gitkeep
 
+# 神经科学调质数据集（可再生成：generate_synthetic_grab_traces.py + prepare_neuroscience_data.py + batch_validate_dynamics.py）
+data/neuroscience_traces/datasets/
+data/neuroscience_traces/processed/
+
 # ============ 日志 / 临时文件 ============
 *.log
 *.out

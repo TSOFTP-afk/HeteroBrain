@@ -293,7 +293,7 @@ __device__ inline void init_new_synapse(BioSynapse& syn, int pre, int post)
     syn.receptor_flags     = 0x03;            // AMPA | NMDA (兴奋性)
     syn.ne_receptor_u8     = static_cast<uint8_t>(NE_RECEPTOR_INIT * 127.0f);
     syn.ht5_receptor_u8    = static_cast<uint8_t>(HT5_RECEPTOR_INIT * 127.0f);
-    syn._pad               = 0;
+    syn.gaba_receptor_u8   = static_cast<uint8_t>(GABA_RECEPTOR_INIT * 127.0f);  // Phase 3a
 }
 
 } // anonymous namespace

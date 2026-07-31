@@ -231,6 +231,9 @@ static_assert(COL_L4_SIZE_2E + COL_L23_SIZE_2E + COL_L5_SIZE_2E + COL_L6_SIZE_2E
 #define ACH_RECEPTOR_INIT         0.3f
 #define NE_RECEPTOR_INIT          0.3f
 #define HT5_RECEPTOR_INIT         0.3f
+// Phase 3a 新增调质受体初始密度
+#define GABA_RECEPTOR_INIT        0.4f     // GABA 调质受体 (抑制性突触偏高, 抗焦虑)
+#define OXYTOCIN_RECEPTOR_INIT    0.2f     // 催产素受体 (社交联结相关突触)
 
 // -----------------------------------------------------------------------------
 // STDP 双 trace (v4 强化 J: Bi & Poo 2001)
@@ -352,13 +355,50 @@ enum class InhibitorySubtype : uint8_t {
 };
 
 // -----------------------------------------------------------------------------
-// 调质系统 (v3/v4)
+// 调质系统 (v3/v4, Phase 3a 扩充到 6 维)
 // -----------------------------------------------------------------------------
-#define N_NEUROMODULATORS_2E      4        // DA / ACh / NE / 5HT
-#define DA_TAU                    100.0f   // ms, 多巴胺衰减
-#define ACH_TAU                   200.0f
-#define NE_TAU                    150.0f
-#define HT5_TAU                   300.0f
+// Phase 3a 情感核心: 6 维调质向量 (DA/ACh/NE/5HT + GABA/催产素)
+//   - 4 维已实现 (DA/ACh/NE/5HT), 复用现有 modulatory_kernels
+//   - 2 维新增 (GABA/催产素): GABA 复用现有 GABA_A/B 受体; 催产素完全新增
+//   - 详见 docs/snn-emotion-and-workspace-direction.md §3.3, §4.1
+#define N_NEUROMODULATORS_2E      6        // DA / ACh / NE / 5HT / GABA / 催产素
+#define DA_TAU                    100.0f   // ms, 多巴胺衰减 (奖励/动机)
+#define ACH_TAU                   200.0f   // 乙酰胆碱 (注意力/记忆编码)
+#define NE_TAU                    150.0f   // 去甲肾上腺素 (警觉/唤醒)
+#define HT5_TAU                   300.0f   // 血清素 (稳定/满足)
+#define GABA_TAU                  120.0f   // GABA (抑制/平静, 抗焦虑) — Phase 3a 新增
+#define OXYTOCIN_TAU              500.0f   // 催产素 (共情/社交联结, 慢变量) — Phase 3a 新增
+
+// 新调质基线浓度与增益 (Phase 3a)
+//   GABA: 基线 0.15, 在 NE 过高时上升 (抗焦虑反馈)
+//   催产素: 基线 0.05, 在共情场景上升 (用户情绪宣泄时)
+#define GABA_BASE                       0.15f
+#define GABA_GAIN                       0.4f    // NE 反馈增益
+#define OXYTOCIN_BASE                   0.05f
+#define OXYTOCIN_GAIN                   0.3f    // 共情驱动增益
+
+// -----------------------------------------------------------------------------
+// Phase 3a-B: 稳态补偿 (Homeostatic Compensation, 防止病理滑移)
+// -----------------------------------------------------------------------------
+// 生物学依据: 持续超阈值神经调质浓度 → 受体下调 (downregulation)
+//   长期 DA 过高 → D2 受体密度下降 (可卡因成瘾模型, Volkow 2001)
+//   长期 5HT 过高 → 5HT2A 受体脱敏 (SSRI 起效延迟机制)
+//   长期 NE 过高 → α1 受体脱敏 (慢性应激模型)
+// 机制: 每 100 步 (launch_modulatory 间隔) 检查调质均值, 超过基线时
+//   受体灵敏度 receptor_sensitivity[ch] *= (1 - rate * (mean - baseline))
+//   低于基线时缓慢回升 (upregulation, 速率减半避免震荡)
+// 作用: 让有效注入信号 = 原始信号 × receptor_sensitivity, 自然抑制持续超阈场景
+#define HOMEOSTATIC_RATE                0.002f  // 受体下调速率 (每 100 步, 缓慢)
+#define HOMEOSTATIC_UPREG_RATE          0.001f  // 受体上调速率 (更慢, 避免震荡)
+#define RECEPTOR_SENSITIVITY_MIN        0.3f    // 灵敏度下限 (防完全失敏, 保底 30%)
+#define RECEPTOR_SENSITIVITY_MAX        1.0f    // 灵敏度上限 (不超过原始)
+// 各调质的稳态基线阈值 (超过此值触发下调, 与 BASE 对齐)
+#define HOMEOSTATIC_BASELINE_DA         0.15f   // DA 稳态阈值 (略高于 DA_BASE=0.1)
+#define HOMEOSTATIC_BASELINE_ACH        0.25f   // ACh 稳态阈值
+#define HOMEOSTATIC_BASELINE_NE         0.20f   // NE 稳态阈值
+#define HOMEOSTATIC_BASELINE_HT5        0.20f   // 5HT 稳态阈值
+#define HOMEOSTATIC_BASELINE_GABA       0.25f   // GABA 稳态阈值
+#define HOMEOSTATIC_BASELINE_OXY        0.15f   // 催产素稳态阈值
 
 // DA 价值函数 (v2 修复 3)
 #define W_VALUE_DIM               200      // 亚柱级 (v3 强化 F: 50→200)

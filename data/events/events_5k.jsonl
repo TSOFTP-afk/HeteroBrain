@@ -1,0 +1,12 @@
+{"event_id": 1, "step_target": 300, "event_type": "food_tasty", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": 30, "duration_s": 0, "description": "早晨吃到喜欢的早餐"}
+{"event_id": 2, "step_target": 700, "event_type": "novelty", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": 25, "duration_s": 0, "description": "路上看到新奇的事物"}
+{"event_id": 3, "step_target": 1100, "event_type": "criticism", "modifiers": {"publicity": "public", "authority": "authority", "temporal": "momentary"}, "intensity": 20, "duration_s": 0, "description": "会议上被上司批评"}
+{"event_id": 4, "step_target": 1500, "event_type": "achievement", "modifiers": {"publicity": "public", "authority": "authority", "temporal": "momentary"}, "intensity": 40, "duration_s": 0, "description": "完成一个重要项目"}
+{"event_id": 5, "step_target": 1900, "event_type": "food_bland", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": -10, "duration_s": 0, "description": "午餐味道很淡"}
+{"event_id": 6, "step_target": 2300, "event_type": "social_bond", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "sustained"}, "intensity": 15, "duration_s": 0, "description": "与好友长时间聊天"}
+{"event_id": 7, "step_target": 2700, "event_type": "threat_physical", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": -30, "duration_s": 0, "description": "差点被车撞到"}
+{"event_id": 8, "step_target": 3100, "event_type": "praise", "modifiers": {"publicity": "public", "authority": "authority", "temporal": "momentary"}, "intensity": 20, "duration_s": 0, "description": "公开受到表扬"}
+{"event_id": 9, "step_target": 3500, "event_type": "social_loss", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": 20, "duration_s": 0, "description": "朋友搬去另一个城市"}
+{"event_id": 10, "step_target": 3900, "event_type": "food_tasty", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "momentary"}, "intensity": 35, "duration_s": 0, "description": "晚餐吃到了美食"}
+{"event_id": 11, "step_target": 4300, "event_type": "threat_social", "modifiers": {"publicity": "public", "authority": "peer", "temporal": "momentary"}, "intensity": -20, "duration_s": 0, "description": "社交场合被排斥"}
+{"event_id": 12, "step_target": 4700, "event_type": "social_bond", "modifiers": {"publicity": "private", "authority": "peer", "temporal": "sustained"}, "intensity": 10, "duration_s": 0, "description": "与家人共度夜晚"}
