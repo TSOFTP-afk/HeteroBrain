@@ -41,6 +41,8 @@ set(SNN_TRAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/scheduler.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/scheduler_checkpoint.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/bptt_trainer.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/bptt_curriculum.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/curriculum_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/synapse_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/neuron_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/modulatory_kernels.cu

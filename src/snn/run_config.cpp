@@ -200,6 +200,26 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
             if (!value) return false;
             config->event_stream_path = value;
             config->event_stream_enabled = true;
+        } else if (arg == "--curriculum") {
+            // Phase 3a-D3: 课程训练数据文件
+            value = require_value(&i, "--curriculum");
+            if (!value) return false;
+            config->curriculum_path = value;
+        } else if (arg == "--curriculum-stage") {
+            // Phase 3a-D3: 课程阶段 0=启蒙 1=初中 2=高中 3=成年
+            value = require_value(&i, "--curriculum-stage");
+            if (!value) return false;
+            if (!parse_long(value, 0, 3, "--curriculum-stage", &parsed, error)) return false;
+            config->curriculum_stage = static_cast<int>(parsed);
+        } else if (arg == "--curriculum-lr") {
+            // Phase 3a-D3: readout 学习率
+            value = require_value(&i, "--curriculum-lr");
+            if (!value) return false;
+            if (!parse_float(value, "--curriculum-lr", &config->curriculum_lr, error)) return false;
+            if (!(config->curriculum_lr > 0.0f)) {
+                *error = std::string("invalid value for --curriculum-lr: ") + value;
+                return false;
+            }
         } else if (arg == "--embodied") {
             // Phase 3a-D1: 具身发育训练模式
             config->embodied_mode = true;
@@ -252,6 +272,9 @@ const char* run_config_usage() {
         "  --input-mode MODE         input mode: bpe (default) or byte\n"
         "  --bpe-data PATH           BPE token binary file path (.bin int32 stream)\n"
         "  --event-stream PATH       enable event-driven modulator injection from JSONL\n"
+        "  --curriculum PATH         Phase 3a-D3 curriculum training data (JSONL)\n"
+        "  --curriculum-stage N      curriculum stage: 0=enlightenment 1=middle(默认) 2=high 3=adult\n"
+        "  --curriculum-lr F         curriculum readout learning rate (default: 0.001)\n"
         "  --embodied                enable embodied developmental mode (Phase 3a-D1)\n"
         "  --embodied-scene ID       specify scene: hunger_feeding|warmth_safety|startle_recover|sleep_wake|discomfort_change\n"
         "  -h, --help                show this help\n";

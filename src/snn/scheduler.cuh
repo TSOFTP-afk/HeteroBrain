@@ -236,6 +236,15 @@ public:
     // main.cpp 在 BPE 注入后调用, 设置当前 BPTT target token
     void set_bptt_target_token(int32_t token) { bptt_last_target_token_ = token; }
 
+    // ==================== Phase 3a-D3: 课程训练接口 ====================
+    // 启用课程模式: 设置目标 6 维调质 + readout 学习率
+    //   BPTT 反向将用调质误差替代解码误差 (backward_curriculum)
+    void set_curriculum_mode(const float target_mod[6], float readout_lr);
+    void disable_curriculum_mode();
+    bool curriculum_active() const { return curriculum_mode_; }
+    // 最近一次课程 BPTT loss (调质 MSE)
+    float curriculum_last_loss() const { return curriculum_last_loss_; }
+
     // Task D3: 暴露 d_gate_states_ 供 main.cpp 在 BPE 注入时使用
     // (BPE 模式下 main.cpp 在 step() 之前调用 launch_bpe_inject, 需要传入门控状态)
     const ThalamicGateState* d_gate_states_for_inject() const { return d_gate_states_; }
@@ -376,6 +385,12 @@ private:
     float bptt_last_grad_norm_ = 0.0f;      // 最近一次 BPTT update 的梯度范数
     float bptt_current_lr_ = 0.0f;          // 当前有效学习率 (含 warmup)
     int32_t bptt_last_target_token_ = 0;    // 当前 BPTT target token (由 main.cpp 设置)
+
+    // ==================== Phase 3a-D3: 课程训练状态 ====================
+    bool  curriculum_mode_ = false;         // 课程模式激活
+    float curriculum_target_mod_[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};  // 目标调质
+    float curriculum_readout_lr_ = 0.001f;  // readout 权重学习率
+    float curriculum_last_loss_ = 0.0f;     // 最近一次课程 BPTT loss
 
     // PCA 增量更新 (每 PCA_UPDATE_INTERVAL 步, CPU 端 Oja's rule)
     void launch_pca_update_cpu(int step);

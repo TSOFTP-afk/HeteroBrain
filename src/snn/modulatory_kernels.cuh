@@ -140,6 +140,12 @@ void set_empathy_signal(float empathy_signal);
 //   优先级: h_event_signal > h_empathy_signal (empathy 作为 Oxy 通道 fallback)
 void set_event_signal(const float modulator_delta[6], int duration_steps);
 
+// 清零事件信号缓存 (每步开始前调用, 配合 set_event_signal 累加注入) [Phase 3a-C2]
+void reset_event_signal();
+
+// 查询当前 step 累加的事件数 (诊断用)
+int get_event_pending_count();
+
 // Phase 3a-D1: 具身训练 reward + curiosity 接口
 //   set_embodied_reward: 覆盖 launch_da_value_function 中的外部 reward
 //   set_curiosity_ach: 持续 ACh 增量 (好奇心驱动), 叠加到 launch_modulatory 的 ACh 通道

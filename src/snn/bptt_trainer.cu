@@ -25,6 +25,7 @@
 // =============================================================================
 
 #include "bptt_trainer.cuh"
+#include "bptt_curriculum.cuh"
 #include <cstdio>
 #include <cmath>
 #include <cuda_runtime.h>
@@ -796,6 +797,92 @@ void BPTTTrainer::backward(PersistentBuffers& buf, uint8_t target_byte)
         CUDA_CHECK_LAST_2E();
 
         // 同步拷贝 loss 到 host
+        CUDA_CHECK_2E(cudaMemcpy(&last_loss_, d_loss_scratch,
+                                  sizeof(float), cudaMemcpyDeviceToHost));
+    } else {
+        last_loss_ = 0.0f;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// backward_curriculum: 课程模式反向 (Phase 3a-D3)
+//   与 backward() 的唯一区别: 最终步 dL/dS[T] 由调质 readout 误差驱动
+//   (替代 decode_error)。反向循环和权重更新完全复用。
+// -----------------------------------------------------------------------------
+void BPTTTrainer::backward_curriculum(PersistentBuffers& buf)
+{
+    const int T = config_.window_size;
+    const int N = n_neurons_;
+    const int NS = n_synapses_;
+    const float threshold = config_.threshold;
+    const float alpha = config_.surrogate_alpha;
+    const float beta = config_.beta;
+
+    int blocks_N  = (N + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
+    int blocks_NS = (NS + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
+
+    // 1. 最终步初始化: dL/dV[T] = dL/dS[T] * sigma'(V[T])
+    //    dL/dS[T] = Σ_m W_cur[i*6+m] · error[m]  (调质 readout 误差反传)
+
+    // 1a. 调质误差反传: dL_dS_direct[i] = Σ_m W_cur[i*6+m] · error[m]
+    //     (复用 d_v_grad_ 作为临时 dL_dS_direct 缓冲, 与 backward() 一致)
+    float* d_dL_dS_direct = d_v_grad_;
+    if (buf.d_curriculum_readout_weights && buf.d_curriculum_error) {
+        launch_curriculum_backprop(buf, d_dL_dS_direct);
+    } else {
+        // 防御: readout 未初始化, 用零梯度
+        bptt_zero_array_kernel<<<blocks_N, THREADS_PER_BLOCK_2E>>>(
+            d_dL_dS_direct, N);
+        CUDA_CHECK_LAST_2E();
+    }
+
+    // 1b. 初始化 dL/dV[T] = dL/dS[T] * sigma'(alpha*(V[T]-theta))
+    bptt_init_final_grad_kernel<<<blocks_N, THREADS_PER_BLOCK_2E>>>(
+        d_dL_dV_,
+        d_dL_dS_direct,
+        d_V_history_ + (size_t)T * N,   // V[T]
+        N, threshold, alpha);
+    CUDA_CHECK_LAST_2E();
+
+    // 2. 反向循环 t = T-1 .. 0 (与 backward() 完全相同)
+    for (int t = T - 1; t >= 0; --t) {
+        const float* V_prev = d_V_history_ + (size_t)t * N;   // V[t]
+        const float* S_prev = d_S_history_ + (size_t)t * N;   // S[t]
+
+        bptt_backward_v_grad_kernel<<<blocks_N, THREADS_PER_BLOCK_2E>>>(
+            d_v_grad_, d_s_grad_reset_, d_dL_dV_, V_prev, S_prev, N, beta);
+        CUDA_CHECK_LAST_2E();
+
+        bptt_backward_dW_kernel<<<blocks_NS, THREADS_PER_BLOCK_2E>>>(
+            d_dL_dW_, d_dL_dV_, buf.d_synapses, S_prev, NS);
+        CUDA_CHECK_LAST_2E();
+
+        bptt_zero_array_kernel<<<blocks_N, THREADS_PER_BLOCK_2E>>>(
+            d_dL_dS_via_W_, N);
+        CUDA_CHECK_LAST_2E();
+
+        bptt_compute_grad_S_prev_csr_kernel<<<blocks_NS, THREADS_PER_BLOCK_2E>>>(
+            d_dL_dS_via_W_, d_dL_dV_, buf.d_synapses, NS);
+        CUDA_CHECK_LAST_2E();
+
+        bptt_combine_grad_kernel<<<blocks_N, THREADS_PER_BLOCK_2E>>>(
+            d_dL_dV_, d_v_grad_, d_dL_dS_via_W_, d_s_grad_reset_,
+            V_prev, N, threshold, alpha);
+        CUDA_CHECK_LAST_2E();
+
+        bptt_clip_dL_dV_kernel<<<1, THREADS_PER_BLOCK_2E, THREADS_PER_BLOCK_2E * sizeof(float)>>>(
+            d_dL_dV_, N, 10.0f, d_loss_scratch);
+        CUDA_CHECK_LAST_2E();
+    }
+
+    // 3. 计算 loss: 0.5 * Σ_m curriculum_error[m]^2
+    ensure_scratch();
+    if (buf.d_curriculum_error) {
+        bptt_compute_loss_kernel<<<1, 256>>>(
+            buf.d_curriculum_error,
+            d_loss_scratch,
+            6);
+        CUDA_CHECK_LAST_2E();
         CUDA_CHECK_2E(cudaMemcpy(&last_loss_, d_loss_scratch,
                                   sizeof(float), cudaMemcpyDeviceToHost));
     } else {

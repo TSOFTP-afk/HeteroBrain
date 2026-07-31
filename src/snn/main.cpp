@@ -20,6 +20,8 @@
 #include "synapse_kernels.cuh"
 #include "run_config.h"
 #include "event_scheduler.h"
+#include "curriculum_loader.h"
+#include "bptt_curriculum.cuh"
 #include "embodied_body.h"
 #include "embodied_env.h"
 #include "embodied_motor.h"
@@ -763,6 +765,48 @@ int main(int argc, char** argv) {
         printf("  [Task D3] BPTT 未启用 (--no-bptt), 走纯 STDP 路径\n\n");
     }
 
+    // ==================== Phase 3a-D3: 课程训练配置 ====================
+    // --curriculum PATH: 加载课程数据, 一个样本 = 一个 BPTT 窗口
+    //   样本事件按 offset 注入 (须落在 100 倍数步被 launch_modulatory 读取),
+    //   窗口起点须为 100 倍数 (建议 --bptt-window 400, 从 step 0 开始)
+    stage2e::CurriculumLoader curriculum_loader;
+    bool curriculum_active = false;
+    size_t curriculum_sample_idx = 0;
+    int curriculum_window_start = 0;
+    const stage2e::CurriculumSample* curriculum_cur_sample = nullptr;
+
+    if (config.bptt_mode && !config.curriculum_path.empty()) {
+        stage2e::CurriculumStage cstage =
+            static_cast<stage2e::CurriculumStage>(config.curriculum_stage);
+        if (curriculum_loader.load_jsonl(config.curriculum_path, cstage)) {
+            curriculum_active = true;
+            // Kernel 0: 初始化 readout 权重 (小随机值, 零梯度对称破缺)
+            stage2e::launch_curriculum_readout_init(
+                allocator.buffers(), 0.01f, config.seed + 0xA11CEu);
+            printf("  [Task D3] 课程训练已启用: %zu 个样本, 阶段=%d(%s), "
+                   "window=%d, readout_lr=%.4f\n",
+                   curriculum_loader.total_samples(), config.curriculum_stage,
+                   stage2e::personality_profile(cstage).name,
+                   config.bptt_window_size, config.curriculum_lr);
+            printf("  [Task D3] 提示: 样本事件 offset 对齐 100 步读取节奏, "
+                   "窗口起点须为 100 倍数 (建议 --bptt-window 400)\n\n");
+        } else {
+            fprintf(stderr, "[P1 WARN] 课程数据加载失败, 以非课程模式继续: %s\n",
+                    config.curriculum_path.c_str());
+        }
+    }
+
+    // 预载第一个样本: 从 step 0 开始即进入课程模式 (首个窗口不走字节预测路径)
+    if (curriculum_active) {
+        curriculum_cur_sample = curriculum_loader.sample(0);
+        curriculum_sample_idx = 1;
+        if (curriculum_cur_sample) {
+            scheduler.set_curriculum_mode(
+                curriculum_cur_sample->target_modulators,
+                config.curriculum_lr);
+        }
+    }
+
     int start_step = 0;
     if (!config.resume_path.empty()) {
         const bool requested_e0 = config.e0_mode;
@@ -817,7 +861,7 @@ int main(int argc, char** argv) {
     // 派发在 scheduler.step() 之前, 确保事件信号被当次 launch_modulatory 读取
     stage2e::EventScheduler event_scheduler;
     bool event_stream_active = false;
-    if (config.event_stream_enabled) {
+    if (config.event_stream_enabled && !curriculum_active) {
         if (event_scheduler.load_jsonl(config.event_stream_path)) {
             event_stream_active = true;
             printf("[P1] 事件流已启用: %zu 个事件, 文件=%s\n",
@@ -861,6 +905,56 @@ int main(int argc, char** argv) {
         // 事件信号写入 h_event_signal[6], 由 scheduler.step() 内的 launch_modulatory 读取
         if (event_stream_active) {
             event_scheduler.dispatch_pending(step);
+        }
+
+        // Phase 3a-D3: 课程训练调度 (在 scheduler.step() 之前)
+        // 一个课程样本 = 一个 BPTT 窗口:
+        //   1. 窗口起点: 切换样本 + set_curriculum_mode(目标调质监督)
+        //   2. 窗口内: 每步 reset 事件缓存 + 注入该步到期样本事件
+        //      (事件 offset 对齐 100 倍数步, 由 launch_modulatory 读取)
+        if (curriculum_active) {
+            int rel = step - curriculum_window_start;
+            if (rel >= config.bptt_window_size) {
+                // 窗口结束 → 切换下一个样本
+                curriculum_window_start = step;
+                rel = 0;
+                curriculum_cur_sample = curriculum_loader.sample(curriculum_sample_idx);
+                curriculum_sample_idx =
+                    (curriculum_sample_idx + 1) % curriculum_loader.total_samples();
+                if (curriculum_cur_sample) {
+                    scheduler.set_curriculum_mode(
+                        curriculum_cur_sample->target_modulators,
+                        config.curriculum_lr);
+                    printf("[Curriculum] step=%d 窗口开始 sample=%d/%zu "
+                           "target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] n_events=%zu\n",
+                           step, curriculum_cur_sample->sample_id,
+                           curriculum_loader.total_samples(),
+                           curriculum_cur_sample->target_modulators[0],
+                           curriculum_cur_sample->target_modulators[1],
+                           curriculum_cur_sample->target_modulators[2],
+                           curriculum_cur_sample->target_modulators[3],
+                           curriculum_cur_sample->target_modulators[4],
+                           curriculum_cur_sample->target_modulators[5],
+                           curriculum_cur_sample->events.size());
+                }
+            }
+            // 事件注入: 每步 reset + 该步到期事件 (与 EventScheduler 语义一致)
+            stage2e::reset_event_signal();
+            if (curriculum_cur_sample) {
+                for (const auto& evt : curriculum_cur_sample->events) {
+                    if (evt.step_offset == rel) {
+                        stage2e::GeneMapEntry entry =
+                            stage2e::GENE_MAP_BASE[evt.event_type];
+                        entry = stage2e::apply_modifiers(entry, 0, evt.intensity);
+                        float delta[6] = {entry.da_delta, entry.ach_delta,
+                                          entry.ne_delta, entry.ht5_delta,
+                                          entry.gaba_delta, entry.oxy_delta};
+                        stage2e::set_event_signal(delta, 0);
+                        printf("[Curriculum-Event] step=%d (rel=%d) type=%d intensity=%d\n",
+                               step, rel, evt.event_type, evt.intensity);
+                    }
+                }
+            }
         }
 
         // ==================== Phase 3a-D1: 每100步环境闭环 ====================

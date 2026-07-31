@@ -145,6 +145,13 @@ struct PersistentBuffers {
     float*             d_decode_error = nullptr;            // [256]
     int*               d_decode_predicted_byte = nullptr;   // [1] host-readable
 
+    // 课程训练调质 readout 层 (Phase 3a-D3: spike → 6 维调质预测)
+    // d_curriculum_readout_weights: [N_TOTAL_NEURONS_2E × 6] ≈ 60K×6×4B = 1.4 MB
+    // d_curriculum_logits / d_curriculum_error: [6]
+    float*             d_curriculum_readout_weights = nullptr;  // [N × 6]
+    float*             d_curriculum_logits = nullptr;           // [6]
+    float*             d_curriculum_error = nullptr;            // [6]
+
     // L5 → 运动皮层稀疏 CSR 突触 (250K 突触, 每运动神经元 50 个 L5 突触)
     // 突触结构 80B + 权重 4B + CSR col_idx 4B
     // 总计 250K × (80 + 4 + 4)B = 250K × 88B ≈ 21 MB

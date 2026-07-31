@@ -19,6 +19,7 @@
 #include "hippocampal_kernels.cuh"
 #include "coactivation_kernels.cuh"
 #include "wm_kernels.cuh"
+#include "bptt_curriculum.cuh"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -1624,25 +1625,62 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
     // forward: T 步 LIF 重放 (不修改 buf.d_neurons)
     bptt_trainer_->forward(buf, current_step - bptt_window_size + 1);
 
-    // backward: 累积 dL/dW (target 用当前字节或 token 低字节)
-    //   input_mode=0 (byte): target = current_byte
-    //   input_mode=1 (bpe):  target = (uint8_t)(current_token & 0xFF)
-    //   (decoder 输出 256 类, BPE token 低字节作为监督信号, 与 decode_kernels 现有 256 类兼容)
-    uint8_t target = (bptt_input_mode == 1)
-                     ? static_cast<uint8_t>(current_token & 0xFF)
-                     : current_byte;
-    bptt_trainer_->backward(buf, target);
+    if (curriculum_mode_) {
+        // ==================== Phase 3a-D3: 课程模式 ====================
+        // 1. readout 前向: spike → 6 维调质预测
+        launch_curriculum_readout_forward(buf);
+        // 2. 误差 + 损失: error[m] = pred[m] - target[m]
+        launch_curriculum_error(buf, curriculum_target_mod_, &curriculum_last_loss_);
+        // 3. 反向: 调质误差经 readout 权重注入最终步梯度, 复用反向循环
+        bptt_trainer_->backward_curriculum(buf);
+        // 4. 突触权重更新 (SGD + 裁剪)
+        bptt_trainer_->update(buf, current_step);
+        // 5. readout 权重更新
+        launch_curriculum_readout_update(buf, curriculum_readout_lr_);
 
-    // update: SGD + 梯度裁剪, 同步到 d_synapses 和 d_weights_cache
-    bptt_trainer_->update(buf, current_step);
+        // 缓存指标 (loss 已由步骤 2 更新)
+        bptt_last_loss_ = curriculum_last_loss_;
+        bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
+        bptt_current_lr_ = bptt_trainer_->get_current_lr(current_step);
+    } else {
+        // ==================== 原字节预测模式 ====================
+        // backward: 累积 dL/dW (target 用当前字节或 token 低字节)
+        //   input_mode=0 (byte): target = current_byte
+        //   input_mode=1 (bpe):  target = (uint8_t)(current_token & 0xFF)
+        //   (decoder 输出 256 类, BPE token 低字节作为监督信号, 与 decode_kernels 现有 256 类兼容)
+        uint8_t target = (bptt_input_mode == 1)
+                         ? static_cast<uint8_t>(current_token & 0xFF)
+                         : current_byte;
+        bptt_trainer_->backward(buf, target);
 
-    // 缓存指标
-    bptt_last_loss_ = bptt_trainer_->get_last_loss();
-    bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
-    bptt_current_lr_ = bptt_trainer_->get_current_lr(current_step);
+        // update: SGD + 梯度裁剪, 同步到 d_synapses 和 d_weights_cache
+        bptt_trainer_->update(buf, current_step);
+
+        // 缓存指标
+        bptt_last_loss_ = bptt_trainer_->get_last_loss();
+        bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
+        bptt_current_lr_ = bptt_trainer_->get_current_lr(current_step);
+    }
 
     // 重置窗口计数器
     bptt_step_counter_ = 0;
+}
+
+// -----------------------------------------------------------------------------
+// Phase 3a-D3: 课程训练模式
+// -----------------------------------------------------------------------------
+void BioMechanismScheduler::set_curriculum_mode(const float target_mod[6], float readout_lr) {
+    for (int i = 0; i < 6; ++i) curriculum_target_mod_[i] = target_mod[i];
+    curriculum_readout_lr_ = readout_lr;
+    curriculum_mode_ = true;
+    printf("[Curriculum] 课程模式启用: target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] readout_lr=%.4f\n",
+           target_mod[0], target_mod[1], target_mod[2],
+           target_mod[3], target_mod[4], target_mod[5], readout_lr);
+}
+
+void BioMechanismScheduler::disable_curriculum_mode() {
+    curriculum_mode_ = false;
+    printf("[Curriculum] 课程模式关闭\n");
 }
 
 } // namespace stage2e

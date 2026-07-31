@@ -39,6 +39,10 @@ struct RunConfig {
     // ==================== Phase 3a-C1: 事件驱动调质注入 ====================
     bool event_stream_enabled = false;
     std::string event_stream_path;      // --event-stream PATH
+    // ==================== Phase 3a-D3: 课程训练 ====================
+    std::string curriculum_path;        // --curriculum PATH (课程 JSONL)
+    int curriculum_stage = 1;           // --stage 1=初中(默认) 2=高中 0=启蒙 3=成年
+    float curriculum_lr = 0.001f;       // --curriculum-lr readout 学习率
     // ==================== Phase 3a-D1: 具身发育训练 ====================
     bool embodied_mode = false;
     std::string embodied_scene = "hunger_feeding";  // 默认场景
