@@ -734,6 +734,8 @@ int main(int argc, char** argv) {
     // 默认 bptt_mode=true (主训练算法), --no-bptt 关闭
     scheduler.bptt_enabled = config.bptt_mode;
     scheduler.bptt_input_mode = (config.input_mode == "bpe") ? 1 : 0;
+    // 纯 STDP 模式可选跳过结构重建 (防 GPU hang)
+    scheduler.skip_structural_rebuild = config.no_structural_rebuild;
 
     // 初始化 BPTT 训练器 (分配 V/S history + 梯度缓冲)
     if (config.bptt_mode) {

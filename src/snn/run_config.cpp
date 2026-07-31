@@ -143,6 +143,9 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
         } else if (arg == "--no-bptt") {
             // Task D1: 禁用 BPTT (纯 STDP 消融)
             config->bptt_mode = false;
+        } else if (arg == "--no-structural-rebuild") {
+            // 跳过 P3-D 结构重建 (纯 STDP 模式防 GPU hang, 与 BPTT 模式行为一致)
+            config->no_structural_rebuild = true;
         } else if (arg == "--bptt-window-size") {
             // Task D1: 截断 BPTT 窗口长度
             value = require_value(&i, "--bptt-window-size");
@@ -240,6 +243,7 @@ const char* run_config_usage() {
         "  --eval-text PATH          held-out evaluation text corpus path\n"
         "  --bptt-mode               enable BPTT surrogate gradient training (default: on)\n"
         "  --no-bptt                 disable BPTT (pure STDP ablation, alias for legacy mode)\n"
+        "  --no-structural-rebuild   skip P3-D structural rebuild (prevent GPU hang in pure STDP)\n"
         "  --bptt-window-size N      truncated BPTT window length (default: 50)\n"
         "  --bptt-lr F               BPTT learning rate (default: 0.01)\n"
         "  --bptt-clip F             gradient clip global norm (default: 5.0)\n"

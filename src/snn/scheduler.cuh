@@ -89,6 +89,9 @@ public:
     //   默认 false, 由 main.cpp 根据 RunConfig.bptt_mode 设置
     //   false 时 scheduler.step() 走纯 STDP 路径 (向后兼容 e0_mode)
     bool bptt_enabled = false;
+    // skip_structural_rebuild: 跳过 P3-D 结构重建 (纯 STDP 模式防 GPU hang,
+    //   与 BPTT 模式拓扑保持稳定行为一致; 由 RunConfig.no_structural_rebuild 设置)
+    bool skip_structural_rebuild = false;
     // bptt_input_mode: 0=byte (旧), 1=bpe (新)
     //   由 main.cpp 根据 RunConfig.input_mode 设置
     int  bptt_input_mode = 0;

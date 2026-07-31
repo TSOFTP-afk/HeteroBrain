@@ -1202,6 +1202,11 @@ void BioMechanismScheduler::launch_structural_plasticity(int step) {
         if (bptt_active()) {
             // BPTT 模式: 跳过结构重建, 保持 CSR 拓扑稳定
             printf("[Stage2e P3-D] step=%d 结构重建跳过 (BPTT 模式, 拓扑保持稳定)\n", step);
+        } else if (skip_structural_rebuild) {
+            // 纯 STDP + --no-structural-rebuild: 跳过结构重建
+            // 原因: prune 大量突触后 CSR 重建导致 GPU hang (step 7000+ 复现),
+            //       与 BPTT 模式一致保持拓扑稳定, 仅执行阶段 1 (PSW 衰减 + 弱突触重置)
+            printf("[Stage2e P3-D] step=%d 结构重建跳过 (--no-structural-rebuild, 拓扑保持稳定)\n", step);
         } else {
             // 非 BPTT 模式: 执行原结构重建逻辑
             // 读取当前 tracker 数量

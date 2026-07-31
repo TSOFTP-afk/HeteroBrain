@@ -28,6 +28,7 @@ struct RunConfig {
     std::string eval_text_path;         // held-out 评估文本路径 (非空时用于评估)
     // ==================== BPTT 代理梯度训练参数 (Task D1) ====================
     bool bptt_mode = true;              // 启用 BPTT 训练 (默认 true, 主训练算法)
+    bool no_structural_rebuild = false;  // 跳过 P3-D 结构重建 (纯 STDP 模式防 GPU hang)
     int  bptt_window_size = 50;         // 截断窗口长度
     float bptt_lr = 0.001f;             // Task F5: 基础学习率 (从 0.01 降至 0.001, 防止梯度爆炸)
     float bptt_clip = 5.0f;             // 梯度裁剪全局范数
