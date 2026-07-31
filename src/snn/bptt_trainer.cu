@@ -809,7 +809,7 @@ void BPTTTrainer::backward(PersistentBuffers& buf, uint8_t target_byte)
 //   与 backward() 的唯一区别: 最终步 dL/dS[T] 由调质 readout 误差驱动
 //   (替代 decode_error)。反向循环和权重更新完全复用。
 // -----------------------------------------------------------------------------
-void BPTTTrainer::backward_curriculum(PersistentBuffers& buf)
+void BPTTTrainer::backward_curriculum(PersistentBuffers& buf, float w_mod, float w_tool)
 {
     const int T = config_.window_size;
     const int N = n_neurons_;
@@ -824,11 +824,13 @@ void BPTTTrainer::backward_curriculum(PersistentBuffers& buf)
     // 1. 最终步初始化: dL/dV[T] = dL/dS[T] * sigma'(V[T])
     //    dL/dS[T] = Σ_m W_cur[i*6+m] · error[m]  (调质 readout 误差反传)
 
-    // 1a. 调质误差反传: dL_dS_direct[i] = Σ_m W_cur[i*6+m] · error[m]
+    // 1a. 调质 + 工具误差合并反传: dL_dS_direct[i] = Σ_m w_mod·W_mod[i,m]·err_mod[m]
+    //                                      + Σ_t w_tool·W_tool[i,t]·err_tool[t]
     //     (复用 d_v_grad_ 作为临时 dL_dS_direct 缓冲, 与 backward() 一致)
     float* d_dL_dS_direct = d_v_grad_;
-    if (buf.d_curriculum_readout_weights && buf.d_curriculum_error) {
-        launch_curriculum_backprop(buf, d_dL_dS_direct);
+    if (buf.d_curriculum_readout_weights && buf.d_curriculum_error
+        && buf.d_curriculum_tool_weights && buf.d_curriculum_tool_error) {
+        launch_curriculum_backprop(buf, d_dL_dS_direct, w_mod, w_tool);
     } else {
         // 防御: readout 未初始化, 用零梯度
         bptt_zero_array_kernel<<<blocks_N, THREADS_PER_BLOCK_2E>>>(

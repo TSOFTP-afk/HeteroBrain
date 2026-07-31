@@ -801,9 +801,13 @@ int main(int argc, char** argv) {
         curriculum_cur_sample = curriculum_loader.sample(0);
         curriculum_sample_idx = 1;
         if (curriculum_cur_sample) {
+            const stage2e::PersonalityProfile& prof =
+                stage2e::personality_profile(static_cast<stage2e::CurriculumStage>(config.curriculum_stage));
             scheduler.set_curriculum_mode(
                 curriculum_cur_sample->target_modulators,
-                config.curriculum_lr);
+                curriculum_cur_sample->target_tool_call,
+                config.curriculum_lr,
+                prof.bptt_loss_weight_mod, prof.bptt_loss_weight_tool);
         }
     }
 
@@ -922,11 +926,16 @@ int main(int argc, char** argv) {
                 curriculum_sample_idx =
                     (curriculum_sample_idx + 1) % curriculum_loader.total_samples();
                 if (curriculum_cur_sample) {
+                    const stage2e::PersonalityProfile& prof =
+                        stage2e::personality_profile(static_cast<stage2e::CurriculumStage>(config.curriculum_stage));
                     scheduler.set_curriculum_mode(
                         curriculum_cur_sample->target_modulators,
-                        config.curriculum_lr);
+                        curriculum_cur_sample->target_tool_call,
+                        config.curriculum_lr,
+                        prof.bptt_loss_weight_mod, prof.bptt_loss_weight_tool);
                     printf("[Curriculum] step=%d 窗口开始 sample=%d/%zu "
-                           "target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] n_events=%zu\n",
+                           "target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] "
+                           "target_tool=%d n_events=%zu\n",
                            step, curriculum_cur_sample->sample_id,
                            curriculum_loader.total_samples(),
                            curriculum_cur_sample->target_modulators[0],
@@ -935,6 +944,7 @@ int main(int argc, char** argv) {
                            curriculum_cur_sample->target_modulators[3],
                            curriculum_cur_sample->target_modulators[4],
                            curriculum_cur_sample->target_modulators[5],
+                           curriculum_cur_sample->target_tool_call,
                            curriculum_cur_sample->events.size());
                 }
             }

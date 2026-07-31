@@ -148,9 +148,13 @@ struct PersistentBuffers {
     // 课程训练调质 readout 层 (Phase 3a-D3: spike → 6 维调质预测)
     // d_curriculum_readout_weights: [N_TOTAL_NEURONS_2E × 6] ≈ 60K×6×4B = 1.4 MB
     // d_curriculum_logits / d_curriculum_error: [6]
-    float*             d_curriculum_readout_weights = nullptr;  // [N × 6]
+    float*             d_curriculum_readout_weights = nullptr;  // [N × 6] 调质 readout
     float*             d_curriculum_logits = nullptr;           // [6]
     float*             d_curriculum_error = nullptr;            // [6]
+    // 工具调用 readout (知识框架): [N × 7] ≈ 60K×7×4B = 1.6 MB, 7 = 6 工具 + 1 不调用
+    float*             d_curriculum_tool_weights = nullptr;     // [N × 7]
+    float*             d_curriculum_tool_logits = nullptr;      // [7]
+    float*             d_curriculum_tool_error = nullptr;       // [7]
 
     // L5 → 运动皮层稀疏 CSR 突触 (250K 突触, 每运动神经元 50 个 L5 突触)
     // 突触结构 80B + 权重 4B + CSR col_idx 4B

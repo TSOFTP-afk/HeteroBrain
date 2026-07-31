@@ -163,6 +163,10 @@ size_t MemoryAllocator::allocate_all() {
                                                         "d_curriculum_readout (60K×6)", &total);
     d_bufs_.d_curriculum_logits  = alloc<float>(6, "d_curriculum_logits", &total);
     d_bufs_.d_curriculum_error   = alloc<float>(6, "d_curriculum_error", &total);
+    d_bufs_.d_curriculum_tool_weights = alloc<float>((size_t)N_TOTAL_NEURONS_2E * 7,
+                                                     "d_curriculum_tool_readout (60K×7)", &total);
+    d_bufs_.d_curriculum_tool_logits  = alloc<float>(7, "d_curriculum_tool_logits", &total);
+    d_bufs_.d_curriculum_tool_error   = alloc<float>(7, "d_curriculum_tool_error", &total);
 
     // L5 → 运动皮层稀疏 CSR 突触
     // 突触数 = N_MOTOR_NEURONS × L5_TO_MOTOR_SYNAPSES_PER_NEURON = 5000 × 50 = 250,000
@@ -263,6 +267,9 @@ void MemoryAllocator::free_all() {
     FREE_PTR(d_bufs_.d_curriculum_readout_weights);
     FREE_PTR(d_bufs_.d_curriculum_logits);
     FREE_PTR(d_bufs_.d_curriculum_error);
+    FREE_PTR(d_bufs_.d_curriculum_tool_weights);
+    FREE_PTR(d_bufs_.d_curriculum_tool_logits);
+    FREE_PTR(d_bufs_.d_curriculum_tool_error);
     FREE_PTR(d_bufs_.d_l5_to_motor_synapses);
     FREE_PTR(d_bufs_.d_l5_to_motor_weights);
     FREE_PTR(d_bufs_.d_l5_to_motor_csr_row_ptr);

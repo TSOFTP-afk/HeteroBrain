@@ -1627,16 +1627,19 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
 
     if (curriculum_mode_) {
         // ==================== Phase 3a-D3: 课程模式 ====================
-        // 1. readout 前向: spike → 6 维调质预测
+        // 1. readout 前向: spike → 6 维调质预测 + 7 类工具注意力
         launch_curriculum_readout_forward(buf);
-        // 2. 误差 + 损失: error[m] = pred[m] - target[m]
-        launch_curriculum_error(buf, curriculum_target_mod_, &curriculum_last_loss_);
-        // 3. 反向: 调质误差经 readout 权重注入最终步梯度, 复用反向循环
-        bptt_trainer_->backward_curriculum(buf);
+        // 2. 误差 + 损失: 调质 MSE + 工具 CE
+        launch_curriculum_error(buf, curriculum_target_mod_, curriculum_target_tool_,
+                                curriculum_w_mod_, curriculum_w_tool_,
+                                &curriculum_last_loss_);
+        // 3. 反向: 两路误差合并注入最终步梯度, 复用反向循环
+        bptt_trainer_->backward_curriculum(buf, curriculum_w_mod_, curriculum_w_tool_);
         // 4. 突触权重更新 (SGD + 裁剪)
         bptt_trainer_->update(buf, current_step);
-        // 5. readout 权重更新
-        launch_curriculum_readout_update(buf, curriculum_readout_lr_);
+        // 5. readout 权重更新 (调质 + 工具)
+        launch_curriculum_readout_update(buf, curriculum_readout_lr_,
+                                         curriculum_w_mod_, curriculum_w_tool_);
 
         // 缓存指标 (loss 已由步骤 2 更新)
         bptt_last_loss_ = curriculum_last_loss_;
@@ -1669,13 +1672,19 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
 // -----------------------------------------------------------------------------
 // Phase 3a-D3: 课程训练模式
 // -----------------------------------------------------------------------------
-void BioMechanismScheduler::set_curriculum_mode(const float target_mod[6], float readout_lr) {
+void BioMechanismScheduler::set_curriculum_mode(const float target_mod[6], int target_tool,
+                                                float readout_lr, float w_mod, float w_tool) {
     for (int i = 0; i < 6; ++i) curriculum_target_mod_[i] = target_mod[i];
+    curriculum_target_tool_ = target_tool;
     curriculum_readout_lr_ = readout_lr;
+    curriculum_w_mod_ = w_mod;
+    curriculum_w_tool_ = w_tool;
     curriculum_mode_ = true;
-    printf("[Curriculum] 课程模式启用: target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] readout_lr=%.4f\n",
+    printf("[Curriculum] 课程模式启用: target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] "
+           "target_tool=%d readout_lr=%.4f w_mod=%.2f w_tool=%.2f\n",
            target_mod[0], target_mod[1], target_mod[2],
-           target_mod[3], target_mod[4], target_mod[5], readout_lr);
+           target_mod[3], target_mod[4], target_mod[5],
+           target_tool, readout_lr, w_mod, w_tool);
 }
 
 void BioMechanismScheduler::disable_curriculum_mode() {

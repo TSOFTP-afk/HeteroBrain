@@ -74,7 +74,7 @@ inline const PersonalityProfile& personality_profile(CurriculumStage stage) {
             /*psw_alpha_beta=*/0.3f,
             /*stdp_eta_multiplier=*/1.5f,
             /*bptt_enabled=*/true,
-            /*loss_mod=*/1.0f, /*loss_pad=*/0.3f, /*loss_tool=*/0.0f,
+            /*loss_mod=*/1.0f, /*loss_pad=*/0.3f, /*loss_tool=*/0.3f,
             /*baseline_mod=*/{0.22f, 0.15f, 0.25f, 0.28f, 0.18f, 0.20f},
         },
         // --- 高中期 (Stage 1b): STDP + BPTT, 自我认同 + 价值观 ---

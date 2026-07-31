@@ -108,7 +108,7 @@ public:
     //   - 最终步初始化: dL/dS[T] = Σ_m W_cur[i*6+m]·error[m] (替代 decode error)
     //   - 反向循环与 backward() 相同
     //   - loss 记录到 last_loss_ (调质 MSE)
-    void backward_curriculum(PersistentBuffers& buf);
+    void backward_curriculum(PersistentBuffers& buf, float w_mod, float w_tool);
 
     // 应用权重更新: SGD + 全局梯度裁剪
     //   1. 计算 ||dL_dW|| 全局范数 (多 block reduction + atomicAdd)

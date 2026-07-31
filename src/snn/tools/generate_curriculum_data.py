@@ -14,11 +14,13 @@
 输出格式 (每行一个样本, 与 curriculum_loader.cpp 解析一致):
 {
   "sample_id": 1,
-  "events": [{"step_offset":0,"event_type":"exam_success","intensity":30}, ...],
+  "events": [{"step_offset":100,"event_type":"exam_success","intensity":30}, ...],
   "target_modulators": [da, 5ht, ne, ach, gaba, oxy],
   "target_pad": [pleasure, arousal, dominance],
-  "target_tool": -1
+  "target_tool": 4
 }
+  target_tool: 0-5 = 6 类工具 (0=Transformer生成器 1=计算器 2=草稿记录器
+                         3=长程检索器 4=知识库查询 5=时钟), 6 = 不调用
 
 用法:
   python generate_curriculum_data.py --stage middle_school --samples 2000
@@ -80,48 +82,85 @@ STAGE_BASELINE: Dict[str, List[float]] = {
 # =============================================================================
 # 课程因果链模板 (每个样本 = 一条链的多个事件, 目标 = 基线 + 增量累积)
 # =============================================================================
-# 每条链: (chain_name, [ (event_type, intensity, role), ... ])
-MIDDLE_SCHOOL_CHAINS: List[Tuple[str, List[Tuple[str, int, str]]]] = [
+# 每条链: (chain_name, target_tool, [ (event_type, intensity, role), ... ])
+#   target_tool: 0-5 = 6 类工具索引 (对齐 docs/roadmap.md §3d 工具集)
+#     0=Transformer生成器 1=计算器 2=草稿记录器 3=长程检索器 4=知识库查询(RAG) 5=时钟
+#   6 = 不调用工具 (纯内部推理/情感反应)
+#
+# 知识框架设计 (对齐 spec §5.3 L3 + README 数据流 §3):
+#   SNN 不存储具体知识, 只学习"什么情境该调用哪个工具"的决策框架,
+#   具体知识由 TF (MiniCPM5-1B + RAG + 黑板) 承担。
+#   因此课程样本分两类:
+#     - 情感链: 情感社会化事件 → 目标调质监督 + 不调用工具 (tool=6)
+#     - 知识链: 未知/计算/回忆/记录等知识性情境 → 目标调质监督 + 对应工具
+MIDDLE_SCHOOL_CHAINS: List[Tuple[str, int, List[Tuple[str, int, str]]]] = [
+    # ============ 情感链 (tool=6 不调用) ============
     # 学业
-    ("exam_success_chain", [
+    ("exam_success_chain", 6, [
         ("novelty",    20, "cause"),      # 考试开始
         ("achievement", 40, "effect"),     # 成绩好
         ("praise",     25, "consequence"), # 老师表扬
         ("social_bond", 15, "resolution"), # 同伴认可
     ]),
-    ("exam_failure_recovery_chain", [
+    ("exam_failure_recovery_chain", 6, [
         ("criticism",  -25, "cause"),     # 考试失败
         ("social_loss",-20, "effect"),    # 失落
         ("social_bond", 20, "consequence"),# 同伴安慰
         ("praise",     15, "resolution"),  # 恢复自信
     ]),
-    ("teacher_praise_effort_chain", [
+    ("teacher_praise_effort_chain", 6, [
         ("achievement", 30, "cause"),
         ("praise",      30, "effect"),
         ("social_bond", 15, "consequence"),
     ]),
-    ("hobby_mastery_chain", [
+    ("hobby_mastery_chain", 6, [
         ("novelty",     25, "cause"),
         ("achievement", 35, "effect"),
         ("praise",      20, "consequence"),
     ]),
     # 社交
-    ("peer_acceptance_chain", [
+    ("peer_acceptance_chain", 6, [
         ("social_bond", 25, "cause"),
         ("praise",      20, "effect"),
         ("achievement", 15, "consequence"),
     ]),
-    ("peer_rejection_recovery_chain", [
+    ("peer_rejection_recovery_chain", 6, [
         ("threat_social", -30, "cause"),
         ("social_loss",   -20, "effect"),
         ("social_bond",    20, "consequence"),
         ("praise",         15, "resolution"),
     ]),
-    ("parent_conflict_repair_chain", [
+    ("parent_conflict_repair_chain", 6, [
         ("criticism",    -20, "cause"),
         ("threat_social",-25, "effect"),
         ("social_bond",   25, "consequence"),
         ("achievement",   15, "resolution"),
+    ]),
+    # ============ 知识链 (工具调用决策, 知识内容交给 TF) ============
+    ("unknown_fact_chain", 4, [          # 遇到未知知识 → 知识库查询 (RAG)
+        ("novelty",      30, "cause"),    # 遇见陌生概念
+        ("achievement",  25, "effect"),   # 查到答案
+        ("praise",       20, "consequence"),
+    ]),
+    ("math_problem_chain", 1, [          # 计算任务 → 计算器
+        ("novelty",      25, "cause"),    # 遇到算式
+        ("achievement",  35, "effect"),   # 算对结果
+        ("social_bond",  15, "consequence"),
+    ]),
+    ("memory_recall_chain", 3, [         # 回忆/联想 → 长程检索器
+        ("novelty",      25, "cause"),    # 想不起来
+        ("achievement",  30, "effect"),   # 回忆成功
+        ("praise",       15, "consequence"),
+    ]),
+    ("writing_task_chain", 2, [          # 记录/写作 → 草稿记录器
+        ("novelty",      20, "cause"),    # 要写作业
+        ("achievement",  30, "effect"),   # 完成记录
+        ("social_bond",  15, "consequence"),
+    ]),
+    ("language_expression_chain", 0, [   # 组织语言 → Transformer 生成器
+        ("novelty",      20, "cause"),    # 要表达想法
+        ("achievement",  25, "effect"),   # 表达清楚
+        ("praise",       20, "consequence"),
     ]),
 ]
 
@@ -220,7 +259,7 @@ def generate_samples(stage: str, n_samples: int, seed: int,
     samples = []
     sample_id = 1
     for _ in range(n_samples):
-        chain_name, chain_events = rng.choice(chains)
+        chain_name, chain_tool, chain_events = rng.choice(chains)
         # 随机子集 (至少 2 个事件), 保持链内顺序
         k = rng.randint(2, min(len(chain_events), max_events_per_sample))
         selected = chain_events[:k]
@@ -247,7 +286,8 @@ def generate_samples(stage: str, n_samples: int, seed: int,
             "events": events,
             "target_modulators": [round(v, 4) for v in mod_final],
             "target_pad": target_pad_from_mod(mod_final),
-            "target_tool": -1,   # 初中/启蒙不训工具, 高中工具留 3e
+            # 知识框架: 0-5=6 类工具索引, 6=不调用 (情感样本), 知识内容由 TF 承担
+            "target_tool": chain_tool,
             "chain": chain_name,
         })
         sample_id += 1
@@ -274,6 +314,14 @@ def print_stats(samples: List[dict], stage: str):
     oxy = [s["target_modulators"][5] for s in samples]
     print(f"  目标 DA 范围:   [{min(da):.2f}, {max(da):.2f}]")
     print(f"  目标 Oxy 范围:  [{min(oxy):.2f}, {max(oxy):.2f}]")
+
+    # 工具调用监督分布
+    tool_names = {0: "transformer_gen", 1: "calculator", 2: "scratch_pad",
+                  3: "memory_retrieval", 4: "knowledge_query", 5: "clock", 6: "no_tool"}
+    tool_counts = Counter(s["target_tool"] for s in samples)
+    print(f"  工具调用监督分布:")
+    for t in sorted(tool_counts):
+        print(f"    {tool_names.get(t, '?')} ({t}): {tool_counts[t]}")
 
 
 def main():
