@@ -23,6 +23,15 @@
 
 #include <cstdint>
 
+// 当被纯 C++ 文件 (如 test_event_scheduler.cpp 等 host 单测) 包含时,
+// __host__/__device__ 关键字未定义, fallback 为空宏让 MSVC 也能编译 (与 types.h 一致)
+#ifndef __host__
+  #define __host__
+#endif
+#ifndef __device__
+  #define __device__
+#endif
+
 // -----------------------------------------------------------------------------
 // 网络规模 (v4)
 // -----------------------------------------------------------------------------
@@ -275,6 +284,14 @@ static_assert(COL_L4_SIZE_2E + COL_L23_SIZE_2E + COL_L5_SIZE_2E + COL_L6_SIZE_2E
 // 降为 2.0 (1/10): 10K 步内 α 增量 ≈ 1.5, 权重 ≈ 1.45 (接近但不饱和)
 #define PSW_ETA_ALPHA_FEEDFORWARD 2.0f
 #define PSW_ETA_BETA_FEEDFORWARD  2.0f
+// 2026-08-02: PSW 证据总量上限 (课程 β 失控修复)
+//   60K 启蒙课程测试: β 从 0.07 爆增到 82 (平衡点 ~183), 91.7% 突触 conf≈0 权重塌缩
+//   等比缩放 α,β 保留比例 (conf=α/(α+β) 不变, 权重连续); 非课程平衡 0.48 远低于此 → 零回归
+#define PSW_EVIDENCE_MAX            5.0f
+// 2026-08-02: 课程 eligibility 注入增益 (归一化到解码路径量级)
+//   原 0.1: n_elig ≈ 2×signal ≈ 0.6 vs 解码 0.005 → 120 倍失配, β 失控主因
+//   新 8e-4: n_elig ≈ 20.5×8e-4×0.5 ≈ 0.008, 与解码同量级; 0.1/127 ≈ 8e-4
+#define CURRICULUM_ELIGIBILITY_GAIN 8e-4f
 // 成熟度阈值: (α+β) > PSW_MATURITY_THRESH 视为已学习稳定突触
 // 设为 0.2 = 初始证据 0.1 的 2 倍, STDP 累积 0.1 证据即视为"开始学习"
 #define PSW_MATURITY_THRESH       0.2f
@@ -599,5 +616,22 @@ static_assert(N_MOTOR_GROUPS * MOTOR_GROUP_SIZE == N_MOTOR_NEURONS,
     exit(EXIT_FAILURE); } } while(0)
 
 #define THREADS_PER_BLOCK_2E      256
+
+// -----------------------------------------------------------------------------
+// PSW 证据总量等比 clamp (2026-08-02: 课程 β 失控修复)
+// 超限时等比缩放 α/β 保留比例: conf = α/(α+β) 不变, 权重 w = W_MAX·conf 连续
+// 置于 config.h: 同时被 synapse_kernels.cu (device 代码) 与
+// test_event_scheduler.cpp (host 单测, 经 mod_simulator.h 间接 include) 使用
+// -----------------------------------------------------------------------------
+namespace stage2e {
+__host__ __device__ inline void psw_clamp_evidence(float& alpha, float& beta, float max_evidence) {
+    float total = alpha + beta;
+    if (total > max_evidence) {
+        float scale = max_evidence / total;
+        alpha *= scale;
+        beta  *= scale;
+    }
+}
+} // namespace stage2e
 
 #endif // SNN_STAGE2E_CONFIG_H

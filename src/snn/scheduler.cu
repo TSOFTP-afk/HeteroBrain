@@ -10,6 +10,7 @@
 //   - spike count 统计 (P1 判据: 极差 > 100, 簇状发放出现)
 // =============================================================================
 
+#include "config.h"
 #include "scheduler.cuh"
 #include "neuron_kernels.cuh"
 #include "synapse_kernels.cuh"
@@ -1882,7 +1883,10 @@ void BioMechanismScheduler::n3f_online_step(int current_step, bool allow_elig_in
     //    backprop_signal 含 PAD 项: Σ_p w_pad·W_pad[i,p]·err_pad[p] (Task 6)
     if (allow_elig_inject) {
         const float decay = expf(-1.0f / NEURON_ELIB_TAU);
-        const float gain = 0.1f;  // 课程增益 (N3F 文档 §3)
+        // 2026-08-02: 课程 eligibility 增益归一化 (fix-curriculum-beta-runaway)
+        //   原 0.1 → n_elig ≈ 0.6, 比解码路径 (≈0.005) 大 120 倍 → β 证据失控
+        //   新 CURRICULUM_ELIGIBILITY_GAIN=8e-4 → n_elig ≈ 0.008, 与解码同量级
+        const float gain = CURRICULUM_ELIGIBILITY_GAIN;
         launch_curriculum_eligibility_update(buf, decay, gain,
                                              curriculum_w_mod_, curriculum_w_tool_,
                                              curriculum_w_pad_);

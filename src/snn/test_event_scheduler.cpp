@@ -195,6 +195,32 @@ void test_default_modifier_flags() {
          "achievement flags=PUBLIC");
 }
 
+// 测试 8: psw_clamp_evidence PSW 证据总量等比 clamp (2026-08-02 课程 β 失控修复)
+// 语义: α+β > max_evidence 时等比缩放两者, 保留 α:β 比例
+//   (conf = α/(α+β) 不变 → 权重 w = W_MAX·conf 连续, 无跳变)
+void test_psw_clamp_evidence() {
+    // 用例 1: α=1.0, β=9.0 (total 10 > 5) → clamp 后 total=5.0, α=0.5, β=4.5, 比例 1:9 保持
+    float a1 = 1.0f, b1 = 9.0f;
+    psw_clamp_evidence(a1, b1, 5.0f);
+    TEST(fabsf((a1 + b1) - 5.0f) < 1e-5f &&
+         fabsf(a1 - 0.5f) < 1e-5f &&
+         fabsf(b1 - 4.5f) < 1e-5f &&
+         fabsf(a1 / (a1 + b1) - (1.0f / 10.0f)) < 1e-5f,
+         "clamp: α=1,β=9 → total=5, α=0.5, β=4.5, ratio 1:9 kept");
+
+    // 用例 2: α=0.3, β=0.3 (total 0.6 < 5) → 不变
+    float a2 = 0.3f, b2 = 0.3f;
+    psw_clamp_evidence(a2, b2, 5.0f);
+    TEST(fabsf(a2 - 0.3f) < 1e-5f && fabsf(b2 - 0.3f) < 1e-5f,
+         "clamp: under cap unchanged");
+
+    // 用例 3: α=0.0, β=0.0 (total 0 < 5) → 不变 (防除零路径, scale 不计算)
+    float a3 = 0.0f, b3 = 0.0f;
+    psw_clamp_evidence(a3, b3, 5.0f);
+    TEST(a3 == 0.0f && b3 == 0.0f,
+         "clamp: zero evidence unchanged (no div-by-zero)");
+}
+
 // 测试 7: C++ CurriculumModSimulator 与 Python 生成器端到端一致性
 // -----------------------------------------------------------------------------
 // 加载 Task 4 重新生成的 curriculum_middle_school.jsonl:
@@ -270,6 +296,7 @@ int main() {
     test_event_type_from_string();
     test_dispatch_pending();
     test_default_modifier_flags();
+    test_psw_clamp_evidence();
     test_mod_simulator_consistency();
     fprintf(stdout, "[test_event_scheduler] PASS=%d FAIL=%d\n", g_test_pass, g_test_fail);
     return g_test_fail == 0 ? 0 : 1;

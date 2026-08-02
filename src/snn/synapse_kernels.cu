@@ -268,10 +268,15 @@ __global__ void stdp_dual_trace_kernel(
     //   - e1[i]: 突触级快 trace (10步累积的 STDP 历史, signed: +LTP / -LTD)
     //   - neuron_eligibility[post]: 解码误差反传的神经元级 credit (signed: +强化 / -削弱)
     //   - 乘积自然给出正确的 LTP/LTD 方向 (见 decode_eligibility_update_kernel 符号约定)
+    // 2026-08-02 (课程 β 失控修复): eligibility 注入增益按 eta_multiplier 反比补偿
+    // 课程教学信号 n_elig 比解码路径大 ~120 倍 (eta_multiplier=3.0 放大), β 失控主因之一;
+    // eff_gain = G / em 把课程信号归一化到解码量级; 非课程 em=1.0 → eff_gain = G 不变
+    // 防除零: eta_multiplier 下限 1e-3 (std::max 为 __host__ constexpr, kernel 内不可用, 用三元)
+    float eff_gain = ELIGIBILITY_EVIDENCE_GAIN / (eta_multiplier > 1e-3f ? eta_multiplier : 1e-3f);
     // 退化保护: 若 eligibility/neuron_eligibility 为 nullptr (旧调用路径), 回退到 delta_w
     float effective_signal;
     if (eligibility != nullptr && neuron_eligibility != nullptr) {
-        effective_signal = ELIGIBILITY_EVIDENCE_GAIN * eligibility[i] * neuron_eligibility[post];
+        effective_signal = eff_gain * eligibility[i] * neuron_eligibility[post];
     } else {
         effective_signal = delta_w;  // 兼容旧调用路径 (不应触发)
     }
@@ -296,6 +301,11 @@ __global__ void stdp_dual_trace_kernel(
         if (rebound_evidence > CA_REBOUND_EVIDENCE_CAP) rebound_evidence = CA_REBOUND_EVIDENCE_CAP;
         synapse_beta[i] += rebound_evidence;
     }
+
+    // 2026-08-02 (课程 β 失控修复): PSW 证据总量上限
+    // 在所有 α/β 累积完成之后执行 (含 LTP/LTD 证据 + Ca²⁺ 回弹 LTD 分支);
+    // 等比 clamp 保留 α:β 比例 → conf = α/(α+β) 与权重连续 (PSW_EVIDENCE_MAX=5.0)
+    psw_clamp_evidence(synapse_alpha[i], synapse_beta[i], PSW_EVIDENCE_MAX);
 
     // 防止 α/β 退化 (保持 > 0, 否则 w_eff 无定义)
     if (synapse_alpha[i] < PSW_ALPHA_MIN) synapse_alpha[i] = PSW_ALPHA_MIN;
@@ -373,11 +383,18 @@ __global__ void stdp_arrival_pre_kernel(
     bool is_feedforward = (s.receptor_flags & RECEPTOR_FLAG_FEEDFORWARD);
     float eta_alpha = is_feedforward ? PSW_ETA_ALPHA_FEEDFORWARD : PSW_ETA_ALPHA;
     float eta_beta  = is_feedforward ? PSW_ETA_BETA_FEEDFORWARD  : PSW_ETA_BETA;
+    // 2026-08-02: 补漏 — 与 stdp_dual_trace_kernel (L262-264) 对齐, 应用课程 eta_multiplier 阶段倍率
+    // 非课程 em=1.0 无影响; 课程模式 arrival (LTD) 与 dual_trace (LTP) 同步缩放
+    eta_alpha *= eta_multiplier;
+    eta_beta  *= eta_multiplier;
 
+    // 2026-08-02 (课程 β 失控修复): eligibility 注入增益按 eta_multiplier 反比补偿 (与 dual_trace 一致)
+    // 防除零: eta_multiplier 下限 1e-3
+    float eff_gain = ELIGIBILITY_EVIDENCE_GAIN / (eta_multiplier > 1e-3f ? eta_multiplier : 1e-3f);
     // 闭环修复: 使用 e1 × neuron_eligibility[post] 替代瞬时 delta_w (与 dual_trace_kernel 一致)
     float effective_signal;
     if (eligibility != nullptr && neuron_eligibility != nullptr) {
-        effective_signal = ELIGIBILITY_EVIDENCE_GAIN * eligibility[syn_idx] * neuron_eligibility[post];
+        effective_signal = eff_gain * eligibility[syn_idx] * neuron_eligibility[post];
     } else {
         effective_signal = delta_w;  // 兼容旧调用路径
     }
@@ -393,6 +410,10 @@ __global__ void stdp_arrival_pre_kernel(
     // Ca²⁺ 回弹 LTD 已移除: 该机制仅由 stdp_dual_trace_kernel 在 post_spike 时触发
     // (BCM 理论: 回弹 LTD 是 post 端 Ca²⁺ 超载的反应, 应由 post 端事件驱动)
     // pre 到达仅处理标准 STDP 的 LTD 分量 (delta_w = -x_post * A_minus), 不叠加额外 LTD
+
+    // 2026-08-02 (课程 β 失控修复): PSW 证据总量上限 (与 dual_trace 一致)
+    // α/β 累积完成后等比 clamp, 保留比例 → conf 与权重连续
+    psw_clamp_evidence(synapse_alpha[syn_idx], synapse_beta[syn_idx], PSW_EVIDENCE_MAX);
 
     if (synapse_alpha[syn_idx] < PSW_ALPHA_MIN) synapse_alpha[syn_idx] = PSW_ALPHA_MIN;
     if (synapse_beta[syn_idx]  < PSW_BETA_MIN)  synapse_beta[syn_idx]  = PSW_BETA_MIN;
