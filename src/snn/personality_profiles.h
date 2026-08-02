@@ -28,16 +28,6 @@ enum CurriculumStage {
     STAGE_COUNT         = 4
 };
 
-// 6 维调质基线索引 (与 modulatory_kernels 的 conc 通道顺序一致)
-enum ModChannel {
-    MOD_DA  = 0,
-    MOD_5HT = 1,
-    MOD_NE  = 2,
-    MOD_ACH = 3,
-    MOD_GABA = 4,
-    MOD_OXY = 5
-};
-
 struct PersonalityProfile {
     CurriculumStage stage;
     const char* name;                 // 阶段名 (用于日志/检查点)
@@ -52,7 +42,7 @@ struct PersonalityProfile {
     float bptt_loss_weight_pad;       // PAD 情感损失权重   (初中 0.3 / 高中 0.5)
     float bptt_loss_weight_tool;      // 工具调用损失权重   (初中 0.0 / 高中 0.5)
 
-    // === 调质基线 (6 维, 与 ModChannel 顺序一致) ===
+    // === 调质基线 (6 维: [DA, 5HT, NE, ACh, GABA, Oxy]) ===
     float baseline_mod[6];            // [DA, 5HT, NE, ACh, GABA, Oxy]
 };
 
@@ -74,7 +64,7 @@ inline const PersonalityProfile& personality_profile(CurriculumStage stage) {
             /*psw_alpha_beta=*/0.3f,
             /*stdp_eta_multiplier=*/1.5f,
             /*bptt_enabled=*/true,
-            /*loss_mod=*/1.0f, /*loss_pad=*/0.3f, /*loss_tool=*/0.3f,
+            /*loss_mod=*/1.0f, /*loss_pad=*/0.3f, /*loss_tool=*/1.0f,
             /*baseline_mod=*/{0.22f, 0.15f, 0.25f, 0.28f, 0.18f, 0.20f},
         },
         // --- 高中期 (Stage 1b): STDP + BPTT, 自我认同 + 价值观 ---

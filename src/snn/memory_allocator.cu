@@ -167,6 +167,18 @@ size_t MemoryAllocator::allocate_all() {
                                                      "d_curriculum_tool_readout (60K×7)", &total);
     d_bufs_.d_curriculum_tool_logits  = alloc<float>(7, "d_curriculum_tool_logits", &total);
     d_bufs_.d_curriculum_tool_error   = alloc<float>(7, "d_curriculum_tool_error", &total);
+    // PAD 情感 readout (2026-08-02 Task 5, 60K×3×4B = 0.7 MB)
+    d_bufs_.d_curriculum_pad_weights = alloc<float>((size_t)N_TOTAL_NEURONS_2E * 3,
+                                                    "d_curriculum_pad_readout (60K×3)", &total);
+    d_bufs_.d_curriculum_pad_logits  = alloc<float>(3, "d_curriculum_pad_logits", &total);
+    d_bufs_.d_curriculum_pad_error   = alloc<float>(3, "d_curriculum_pad_error", &total);
+    // 课程窗口累计 spike 平均发放率 (60K×4B = 0.23 MB)
+    d_bufs_.d_curriculum_accum_spikes = alloc<float>(N_TOTAL_NEURONS_2E,
+                                                     "d_curriculum_accum_spikes (60K)", &total);
+    // 2026-08-01 spec §7.9: 目标调质 + PAD + loss 归约缓冲 (消除静态懒分配)
+    //   [0..6) = 调质目标, [6..9) = PAD 目标 (Task 5 扩展)
+    d_bufs_.d_curriculum_target = alloc<float>(9, "d_curriculum_target (6 mod + 3 pad)", &total);
+    d_bufs_.d_curriculum_loss   = alloc<float>(1, "d_curriculum_loss", &total);
 
     // L5 → 运动皮层稀疏 CSR 突触
     // 突触数 = N_MOTOR_NEURONS × L5_TO_MOTOR_SYNAPSES_PER_NEURON = 5000 × 50 = 250,000
@@ -270,6 +282,13 @@ void MemoryAllocator::free_all() {
     FREE_PTR(d_bufs_.d_curriculum_tool_weights);
     FREE_PTR(d_bufs_.d_curriculum_tool_logits);
     FREE_PTR(d_bufs_.d_curriculum_tool_error);
+    // 2026-08-02 Task 5: PAD 情感 readout 缓冲释放
+    FREE_PTR(d_bufs_.d_curriculum_pad_weights);
+    FREE_PTR(d_bufs_.d_curriculum_pad_logits);
+    FREE_PTR(d_bufs_.d_curriculum_pad_error);
+    FREE_PTR(d_bufs_.d_curriculum_accum_spikes);
+    FREE_PTR(d_bufs_.d_curriculum_target);
+    FREE_PTR(d_bufs_.d_curriculum_loss);
     FREE_PTR(d_bufs_.d_l5_to_motor_synapses);
     FREE_PTR(d_bufs_.d_l5_to_motor_weights);
     FREE_PTR(d_bufs_.d_l5_to_motor_csr_row_ptr);

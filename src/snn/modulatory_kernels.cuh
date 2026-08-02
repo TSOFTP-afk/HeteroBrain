@@ -44,12 +44,16 @@ namespace stage2e {
 // 催产素: 基线0.05, 共情信号驱动上升 (Phase 3a)
 //
 // DA 释放区域: [0, N_TOTAL_NEURONS_2E) = [0, 60000), 包含联合皮层 + 前额叶 + 运动皮层
+// stage_baseline: 课程模式阶段调质基线 [DA, 5HT, NE, ACh, GABA, Oxy]
+//                 (nullptr = 使用 config.h 默认常量, 非课程模式)
 void launch_modulatory(MemoryAllocator* alloc, int step,
                        float reward_signal, float novelty,
                        float pred_succ, float kl_divergence,
                        float da_delta,
                        float prediction_error_norm,
-                       float empathy_signal = 0.0f);  // Phase 3a
+                       float empathy_signal = 0.0f,        // Phase 3a
+                       const float* stage_baseline = nullptr,   // Phase 3a-D3: 阶段基线
+                       bool deterministic = false);        // 课程模式: 关闭网络依赖动力学项
 
 // DA价值函数更新 (每100步)
 void launch_da_value_function(MemoryAllocator* alloc, int step,

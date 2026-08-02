@@ -50,6 +50,10 @@ static const GeneMapEntry GENE_MAP_BASE[EVT_COUNT] = {
     { 0.50f,  0.15f,  0.20f, -0.10f,  0.00f,  0.05f,  1.5f},
     // EVT_NOVELTY:       ACh↑+DA↑ (惊奇)
     { 0.15f,  0.40f,  0.10f,  0.00f,  0.00f,  0.00f,  2.0f},
+    // EVT_QUESTION:      知识性问题 (ACh↑↑ 认知警觉 + NE↑↑ 任务警觉 + DA↓ 非奖赏探索)
+    //   与 novelty 区分: novelty = ACh+DA (好奇/奖赏预期), question = ACh+NE (认知任务警觉)
+    //   NE 0.45 vs novelty 0.10 → 4.5 倍区分度, 驱动工具调用 readout 的特征信号
+    { 0.10f,  0.45f,  0.45f,  0.05f,  0.05f,  0.05f,  2.0f},
 };
 
 // 应用修饰符 + intensity 调制 (纯函数, 设计文档 §4.2)
@@ -78,6 +82,22 @@ inline GeneMapEntry apply_modifiers(GeneMapEntry base, int modifier_flags, int i
         result.duration_s *= 3.0f;
     }
     return result;
+}
+
+// 事件类型 → 默认修饰符 flags (与 Python generate_curriculum_data.py EVENT_DEFAULT_MOD 一致)
+//   public → MOD_PUBLIC (Oxy×1.5 + NE×1.2) | authority → MOD_AUTHORITY (DA×1.3 + 5HT×1.2)
+//   sustained → MOD_SUSTAINED (duration×3)
+inline int event_default_modifier_flags(EventType t) {
+    switch (t) {
+        case EVT_THREAT_PHYSICAL: return MOD_AUTHORITY;
+        case EVT_THREAT_SOCIAL:
+        case EVT_PRAISE:
+        case EVT_CRITICISM:       return MOD_PUBLIC | MOD_AUTHORITY;
+        case EVT_SOCIAL_BOND:
+        case EVT_SOCIAL_LOSS:     return MOD_PUBLIC | MOD_SUSTAINED;
+        case EVT_ACHIEVEMENT:     return MOD_PUBLIC;
+        default:                  return 0;  // food_tasty/food_bland/novelty/question = private/peer/momentary
+    }
 }
 
 } // namespace stage2e

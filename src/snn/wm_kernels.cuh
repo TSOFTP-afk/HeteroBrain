@@ -101,6 +101,12 @@ void launch_wm_maintain(WMSlot* d_slots, const float* d_pca_W,
                         int n_slots, int n_pf, int group_sz,
                         float inject_thr, float decay, int n_comp, int n_neurons);
 
+// 前额叶注入合并 (2026-08-01 修复): 把 WM 写出的 d_prefrontal_input 并入主网络
+// d_input_current 的对应前额叶神经元区间 (全局索引 [N_ASSOCIATION_NEURONS_2E, +N_PREFRONTAL))
+// 必须在 delay_inject (清零 input_current) 之后、lif_adex 之前调用
+void launch_merge_prefrontal_input(const float* d_pf_input, float* d_input_current,
+                                   int n_pf, int pf_start);
+
 } // namespace stage2e
 
 #endif // SNN_STAGE2E_WM_KERNELS_CUH

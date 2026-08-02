@@ -25,6 +25,7 @@ enum EventType {
     EVT_SOCIAL_LOSS,
     EVT_ACHIEVEMENT,
     EVT_NOVELTY,
+    EVT_QUESTION,   // 知识性问题 (课程训练: 遇到不会的 → 调用工具)
     EVT_COUNT
 };
 
@@ -52,6 +53,7 @@ inline EventType event_type_from_string(const char* s) {
     if (str == "social_loss")      return EVT_SOCIAL_LOSS;
     if (str == "achievement")      return EVT_ACHIEVEMENT;
     if (str == "novelty")          return EVT_NOVELTY;
+    if (str == "question")         return EVT_QUESTION;
     return EVT_COUNT;
 }
 

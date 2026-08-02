@@ -38,7 +38,13 @@ __global__ void multi_sensory_inject_kernel(
         state ^= state << 5;
         int neuron_offset = (int)(state % (unsigned int)l4_size);
         int neuron_idx = sensory_base + neuron_offset;
-        atomicAdd(&input_current[neuron_idx], POP_CODING_GAIN * effective);
+        // 2026-08-01 修复: 感知注入增益 POP_CODING_GAIN → SENSORY_INJECT_GAIN
+        //   根因: 感知注入修复生效后, 每环境步用 POP_CODING_GAIN=80 驱动 50 柱×100
+        //   = 5000 个 L4 神经元, 对网络过强 → L4 活动剧增 (spikes 700→1234) →
+        //   PCA Oja 输入分布突变 → W_norm 15→5.5e8 发散 → WM 签名异常 → 前额叶仍不激活.
+        //   修复: 感知信号本质是"弱引导" (沙盒 v1 极简: 内感态向量), 用独立温和增益,
+        //   维持感知可分辨又不破坏 PCA 统计稳定性.
+        atomicAdd(&input_current[neuron_idx], SENSORY_INJECT_GAIN * effective);
     }
 }
 

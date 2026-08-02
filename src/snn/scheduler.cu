@@ -20,6 +20,7 @@
 #include "coactivation_kernels.cuh"
 #include "wm_kernels.cuh"
 #include "bptt_curriculum.cuh"
+#include "multi_sensory_inject.cuh"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -516,6 +517,24 @@ void BioMechanismScheduler::step(int current_step) {
         launch_input_inject(alloc_, current_byte, d_gate_states_);
     }
 
+    // 2.5 具身感知注入 + 前额叶 WM 注入合并 (2026-08-01 修复)
+    //   修复根因1 (感知死代码): main.cpp 在 step() 之前调用 launch_multi_sensory_inject,
+    //     写入 d_input_current 后被本函数开头 delay_inject 的 memset 清零, 感知从未到达网络.
+    //     现在由 scheduler 在 delay_inject 之后、lif_adex 之前注入.
+    //   注入节奏: 感知向量只在环境步 (每 100 SNN 步) 更新, 注入后清标志 (单次脉冲),
+    //     与原始设计一致 (每环境步注入一次), 避免持续大电流注入破坏网络活动统计
+    //     (实测: 每步注入 → spikes 700→2000, PCA W_norm 15→4e9 发散).
+    //   修复根因2 (前额叶死寂): wm_maintain_kernel 写出的 d_prefrontal_input 从未并入
+    //     d_input_current, 前额叶 20K 步活跃 N=0. 现在每步合并到前额叶神经元区间.
+    if (embodied_sensory_active_ && buf.d_input_current) {
+        launch_multi_sensory_inject(h_embodied_sensory_, buf.d_input_current, d_gate_states_);
+        embodied_sensory_active_ = false;  // 单次注入 (每环境步由 main.cpp 重新设置)
+    }
+    if (buf.d_prefrontal_input) {
+        launch_merge_prefrontal_input(buf.d_prefrontal_input, buf.d_input_current,
+                                      N_PREFRONTAL_NEURONS, N_ASSOCIATION_NEURONS_2E);
+    }
+
     // 3. AdEx 神经元更新 (产生 spike_flags)
     // Both counters share one allocation; clear them with one launch.
     cudaMemsetAsync(d_spike_counter_, 0, 2 * sizeof(int));
@@ -535,7 +554,7 @@ void BioMechanismScheduler::step(int current_step) {
 
     // 5. STDP 双 trace + Δw (pre 侧由延迟到达事件驱动)
     launch_stdp_dual_trace(alloc_, current_step, phase.plasticity_gain,
-                           arrived_ring_idx, arrived_count);
+                           arrived_ring_idx, arrived_count, stdp_eta_multiplier_);
 
     // 6. STP 短期可塑性 (由延迟到达事件驱动)
     launch_stdp_stp(alloc_, current_step, arrived_ring_idx, arrived_count);
@@ -626,8 +645,17 @@ void BioMechanismScheduler::step(int current_step) {
                    aff.pleasure, aff.arousal, aff.dominance,
                    aff.temperature_delta, aff.empathy_level, aff.confidence);
         }
-        launch_wm_update(current_step);
     }
+
+    // 2026-08-01 修复: launch_wm_update 从 %100 块移出, 改为每步调用
+    //   根因: 原实现把整个 launch_wm_update (含 wm_maintain 维持+注入) 放在
+    //   step%100==0 块内, 但 wm_maintain 注释声明"每步"执行. 实际每 100 步才
+    //   刷新一次 d_prefrontal_input, 而 step() 内前额叶合并 kernel 每步注入
+    //   同一个旧值 → 等效电流放大 100 倍 → 前额叶持续爆发 → PCA Oja 更新发散
+    //   (W_norm 4e9 → NaN, 3K 实测). 改为每步调用后, wm_maintain 每步衰减+重写
+    //   d_prefrontal_input (阶段1 WM 写入内部已有 %WM_WRITE_INTERVAL 门控, 节奏不变),
+    //   合并注入的是当前步新值, 电流量级正常, PCA 恢复稳定.
+    launch_wm_update(current_step);
 
     // ==================== Task 2: PCA 增量更新 (每 PCA_UPDATE_INTERVAL 步) ====================
     // warmup 期 (step <= PCA_WARMUP_STEPS) 不更新, 等发放率稳定
@@ -861,8 +889,11 @@ void BioMechanismScheduler::launch_modulatory(int step) {
 
     // 调质浓度动力学
     float kl_div = 0.0f;  // P2 简化: NE 暂不触发
+    const float* stage_baseline =
+        curriculum_baseline_active_ ? curriculum_baseline_mod_ : nullptr;
     ::stage2e::launch_modulatory(alloc_, step, reward, novelty, pred_succ, kl_div, da_delta,
-                                  prediction_error_norm);
+                                  prediction_error_norm, 0.0f, stage_baseline,
+                                  curriculum_baseline_active_);
 }
 
 void BioMechanismScheduler::launch_scaling(int step) {
@@ -1199,6 +1230,12 @@ void BioMechanismScheduler::launch_structural_plasticity(int step) {
     //         10K 步训练实测: step 6000 P3-D prune 1.17M 突触后, step 7000+ GPU hang.
     //   修复: BPTT 模式下拓扑保持稳定, 仅执行阶段 1 (PSW 衰减 + 弱突触重置).
     //         非 BPTT 模式 (纯 STDP) 保留原行为, 不影响向后兼容.
+    //
+    // N3F: 保留结构重建 (三因子在线学习的核心优势: 共激活→新突触+弱突触修剪).
+    //   2026-08-01 修复重建 GPU hang 根因: csr_rebuild_kernel 只重排 d_synapses +
+    //   d_row_ptr, 未同步重排 d_csr_col_idx 等 10.7M 对齐数组 → STDP/NMDA kernel
+    //   post 索引错位/越界. 已在 launch_csr_rebuild 内部通过
+    //   launch_remap_aligned_arrays 同步重排 + 尾部清零, N3F 可安全执行结构重建.
     if (step > 0 && step % STRUCTURAL_REBUILD_INTERVAL == 0) {
         if (bptt_active()) {
             // BPTT 模式: 跳过结构重建, 保持 CSR 拓扑稳定
@@ -1245,11 +1282,29 @@ void BioMechanismScheduler::launch_structural_plasticity(int step) {
                 //   2. 调用 launch_csr_rebuild (含 5% 判定)
                 //   3. 重建后启动 csr_integrity_check_kernel 校验
                 //   4. 校验失败时从旧副本回滚
+                // 对齐数组 (col_idx/eligibility 等 10.7M): 由 launch_csr_rebuild
+                //   内部 Step 7.5 同步重排, 防止重建后 STDP/NMDA post 索引错位 → GPU hang
+                stage2e::AlignedSynapseArrays aligned;
+                std::memset(&aligned, 0, sizeof(aligned));
+                aligned.synapses          = buf.d_synapses;
+                aligned.col_idx           = buf.d_csr_col_idx;
+                aligned.weights_cache     = buf.d_weights_cache;
+                aligned.trace_epoch       = buf.d_stdp_trace_epoch;
+                aligned.x_pre_trace       = buf.d_stdp_x_pre_trace;
+                aligned.eligibility       = buf.d_eligibility;
+                aligned.eligibility_slow  = buf.d_eligibility_slow;
+                aligned.synapse_alpha     = buf.d_synapse_alpha;
+                aligned.synapse_beta      = buf.d_synapse_beta;
+                aligned.ca_snapshot       = buf.d_ca_snapshot;
+                aligned.oxytocin_receptor = buf.d_oxytocin_receptor;
+                aligned.synapse_delay     = buf.d_synapse_delay;
+                aligned.camkii_activity   = buf.d_camkii_activity;
                 int integrity_err = launch_csr_rebuild_with_integrity_check(
                     buf.d_synapses, buf.d_csr_row_ptr,
                     d_new_synapse_pairs_, new_count,
                     d_prune_marks_, N_TOTAL_NEURONS_2E,
                     n_synapses_total,
+                    aligned, N_TOTAL_SYNAPSES_2E,
                     0);  // stream = 0 (默认流)
                 bool rebuilt = (integrity_err == 0);
 
@@ -1387,6 +1442,17 @@ void BioMechanismScheduler::launch_pca_update_cpu(int step) {
             proj[k] += h_pca_W_[base + k] * x;
         }
     }
+    // 2026-08-01 修复: Oja 更新数值防护
+    //   根因: 具身感知注入修复后, 每环境步注入 POP_CODING_GAIN=80 大电流到 L4,
+    //   网络活动分布改变 (spikes ~700→1234, mean_fr 0.003→0.02), proj 变大,
+    //   原无防护 Oja 更新 (w += lr·(x-w·proj)·proj) 在 proj 大时发散 → W_norm NaN.
+    //   防护: proj 限幅 ±PCA_PROJ_CLAMP; 更新后检查有限性, 异常则跳过 (保留旧 W).
+    const float proj_clamp = 50.0f;
+    for (int k = 0; k < K; ++k) {
+        if (!(proj[k] == proj[k])) proj[k] = 0.0f;          // NaN → 0
+        if (proj[k] >  proj_clamp) proj[k] =  proj_clamp;   // 限幅
+        if (proj[k] < -proj_clamp) proj[k] = -proj_clamp;
+    }
     // 阶段2: Oja 更新 W[i][k] += η · (x[i] - W[i][k]·proj[k]) · proj[k]
     //   需阶段1 全部完成 (proj[k] 依赖所有 i), 故分两趟
     for (int i = 0; i < N; ++i) {
@@ -1394,7 +1460,11 @@ void BioMechanismScheduler::launch_pca_update_cpu(int step) {
         size_t base = (size_t)i * K;
         for (int k = 0; k < K; ++k) {
             float w = h_pca_W_[base + k];
-            h_pca_W_[base + k] = w + lr * (x - w * proj[k]) * proj[k];
+            float w_new = w + lr * (x - w * proj[k]) * proj[k];
+            // 有限性防护: 异常更新跳过 (防止 NaN/inf 污染 PCA 基矩阵)
+            if (w_new == w_new && w_new > -1e6f && w_new < 1e6f) {
+                h_pca_W_[base + k] = w_new;
+            }
         }
     }
 
@@ -1501,7 +1571,11 @@ void BioMechanismScheduler::decode_step(uint8_t current_input_byte,
 
             // 2b. eligibility 闭环修复: 预测误差反传到神经元级 eligibility
             // 在权重更新之前调用, 让 STDP kernel 下一步能读取到最新的 neuron_eligibility
-            launch_decode_eligibility_update(buf);
+            // N3F 课程模式: 禁用 decode eligibility, 避免字节预测教学信号
+            // 与课程教学信号 (n3f_online_step) 竞争同一 d_neuron_eligibility 缓冲
+            if (!n3f_mode()) {
+                launch_decode_eligibility_update(buf);
+            }
 
             // 2c. 权重更新 (ΔW = -η · error · spike_flags)
             launch_decode_weight_update(buf);
@@ -1627,11 +1701,13 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
 
     if (curriculum_mode_) {
         // ==================== Phase 3a-D3: 课程模式 ====================
-        // 1. readout 前向: spike → 6 维调质预测 + 7 类工具注意力
+        // 1. readout 前向: spike → 6 维调质预测 + 3 维 PAD 预测 + 7 类工具注意力
         launch_curriculum_readout_forward(buf);
-        // 2. 误差 + 损失: 调质 MSE + 工具 CE
+        launch_curriculum_pad_forward(buf);
+        // 2. 误差 + 损失: 调质 MSE + PAD MSE + 工具 CE
         launch_curriculum_error(buf, curriculum_target_mod_, curriculum_target_tool_,
-                                curriculum_w_mod_, curriculum_w_tool_,
+                                curriculum_target_pad_,
+                                curriculum_w_mod_, curriculum_w_tool_, curriculum_w_pad_,
                                 &curriculum_last_loss_);
         bptt_last_loss_ = curriculum_last_loss_;
         bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
@@ -1643,13 +1719,17 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
             return;
         }
 
-        // 3. 反向: 两路误差合并注入最终步梯度, 复用反向循环
+        // 3. 反向: 三路误差合并注入最终步梯度, 复用反向循环
+        //    (注: backward_curriculum 为 bptt_trainer 方法, 签名固定 (w_mod, w_tool);
+        //    PAD 项经 launch_curriculum_backprop 的 w_pad 默认 0 数学上无贡献 —
+        //    仅 N3F eligibility 路径携带 PAD 网络梯度, BPTT 路径 PAD 只训 readout 头)
         bptt_trainer_->backward_curriculum(buf, curriculum_w_mod_, curriculum_w_tool_);
         // 4. 突触权重更新 (SGD + 裁剪)
         bptt_trainer_->update(buf, current_step);
-        // 5. readout 权重更新 (调质 + 工具)
+        // 5. readout 权重更新 (调质 + PAD + 工具)
         launch_curriculum_readout_update(buf, curriculum_readout_lr_,
-                                         curriculum_w_mod_, curriculum_w_tool_);
+                                         curriculum_w_mod_, curriculum_w_tool_,
+                                         curriculum_w_pad_);
 
         // 缓存指标
         bptt_last_grad_norm_ = bptt_trainer_->get_last_grad_norm();
@@ -1681,24 +1761,166 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
 // -----------------------------------------------------------------------------
 // Phase 3a-D3: 课程训练模式
 // -----------------------------------------------------------------------------
+void BioMechanismScheduler::set_curriculum_stage(CurriculumStage stage) {
+    // 从人格参数表 (只读) 读取阶段参数:
+    //   - stdp_eta_multiplier: STDP eta 阶段倍率 (启蒙 3.0 / 初中 1.5 / 高中 1.0 / 成年 0.3)
+    //   - baseline_mod[6]: 调质基线 [DA, 5HT, NE, ACh, GABA, Oxy] (Task 4)
+    // 仅课程模式生效; disable_curriculum_mode 时还原 (倍率 1.0, 基线失效)
+    const PersonalityProfile& p = personality_profile(stage);
+    curriculum_stage_ = stage;
+    stdp_eta_multiplier_ = p.stdp_eta_multiplier;
+    for (int i = 0; i < 6; ++i) curriculum_baseline_mod_[i] = p.baseline_mod[i];
+    curriculum_baseline_active_ = true;
+    printf("[Curriculum] 阶段参数: stage=%s stdp_eta_multiplier=%.2f "
+           "baseline_mod=[DA %.3f | 5HT %.3f | NE %.3f | ACh %.3f | GABA %.3f | Oxy %.3f]\n",
+           p.name, p.stdp_eta_multiplier,
+           p.baseline_mod[0], p.baseline_mod[1], p.baseline_mod[2],
+           p.baseline_mod[3], p.baseline_mod[4], p.baseline_mod[5]);
+}
+
 void BioMechanismScheduler::set_curriculum_mode(const float target_mod[6], int target_tool,
+                                                const float target_pad[3],
                                                 float readout_lr, float w_mod, float w_tool) {
     for (int i = 0; i < 6; ++i) curriculum_target_mod_[i] = target_mod[i];
     curriculum_target_tool_ = target_tool;
+    for (int i = 0; i < 3; ++i) curriculum_target_pad_[i] = target_pad[i];
     curriculum_readout_lr_ = readout_lr;
     curriculum_w_mod_ = w_mod;
     curriculum_w_tool_ = w_tool;
+    // PAD 损失权重来源 (2026-08-02 Task 5 选择: 内部 profile 而非签名参数):
+    //   调用时序约束: main.cpp 保证 set_curriculum_stage 先于本函数调用
+    //   (Task A 接线), curriculum_stage_ 已就绪; 从阶段 profile 内部取
+    //   bptt_loss_weight_pad (初中 0.3 / 高中 0.5), 启蒙/成年为 0 → PAD 项无贡献
+    curriculum_w_pad_ = personality_profile(curriculum_stage_).bptt_loss_weight_pad;
     curriculum_mode_ = true;
     printf("[Curriculum] 课程模式启用: target_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] "
-           "target_tool=%d readout_lr=%.4f w_mod=%.2f w_tool=%.2f\n",
+           "target_pad=[%.3f %.3f %.3f] "
+           "target_tool=%d readout_lr=%.4f w_mod=%.2f w_tool=%.2f w_pad=%.2f\n",
            target_mod[0], target_mod[1], target_mod[2],
            target_mod[3], target_mod[4], target_mod[5],
-           target_tool, readout_lr, w_mod, w_tool);
+           target_pad[0], target_pad[1], target_pad[2],
+           target_tool, readout_lr, w_mod, w_tool, curriculum_w_pad_);
 }
 
 void BioMechanismScheduler::disable_curriculum_mode() {
     curriculum_mode_ = false;
     printf("[Curriculum] 课程模式关闭\n");
+}
+
+// 每 100 步推进浓度模拟器并刷新当前块目标 (2026-08-02 Task 5)
+//   收集本 100 步块 (rel 处) 到期事件 → advance_block (与 launch_modulatory
+//   读取同一批 h_event_signal 事件) → 更新 curriculum_target_mod_curr_ /
+//   curriculum_target_pad_curr_ (N3F 每步误差用的分段监督目标)
+void BioMechanismScheduler::advance_curriculum_target(const CurriculumSample* sample,
+                                                      int rel, const float base_signal[6]) {
+    // 收集本 100 步块 (rel 处) 到期事件
+    int ev_types[8] = {0}; int ev_intens[8] = {0}; int n = 0;
+    if (sample) {
+        for (const auto& evt : sample->events) {
+            if (evt.step_offset == rel && n < 8) {
+                ev_types[n] = evt.event_type;   // CurriculumEvent.event_type 是 int (EventType 枚举)
+                ev_intens[n] = evt.intensity;
+                n++;
+            }
+        }
+    }
+    curriculum_mod_sim_.advance_block(ev_types, ev_intens, n, base_signal);
+    const float* conc = curriculum_mod_sim_.conc();
+    for (int i = 0; i < 6; ++i) curriculum_target_mod_curr_[i] = conc[i];
+    pad_from_concentration(conc, curriculum_target_pad_curr_);
+}
+
+// -----------------------------------------------------------------------------
+// N3F: 调质门控三因子在线学习 — 每步教学信号注入
+//   1. readout 前向 (当前帧 spike): 调质 6 维 + 工具 7 类 logits
+//   2. 课程误差: mod_error[6] (MSE) + tool_error[7] (CE) + 总 loss
+//   3. 教学信号 → 神经元级 eligibility (事件门控, spec §7.1 恢复 2026-08-02):
+//        elig[i] = λ·elig[i] - g·(Σ_m w_mod·W_mod[i,m]·err_mod[m]
+//                               + Σ_t w_tool·W_tool[i,t]·err_tool[t])
+//     allow_elig_inject=true (窗口内事件已注入) 时才注入; 事件前不注入,
+//     消除教学目标与事件注入时序失配造成的虚假误差 (§7.1 P0 缺陷).
+//     STDP kernel (下次 scheduler.step 内) 读取 elig[post] 调制突触证据,
+//     实现三因子闭环: pre·post (STDP trace) × 教学信号 → 突触结构/权重演化。
+//   与 BPTT 的本质区别: 无窗口重放、无历史缓冲、无全局反传, 每步局部在线。
+// -----------------------------------------------------------------------------
+void BioMechanismScheduler::n3f_online_step(int current_step, bool allow_elig_inject) {
+    if (!curriculum_mode_) return;
+    PersistentBuffers& buf = alloc_->buffers();
+    if (!buf.d_curriculum_readout_weights || !buf.d_curriculum_tool_weights) return;
+
+    // [N3F perf] 每 1000 步统计 n3f 部分耗时
+    static cudaEvent_t s_ev_start = nullptr, s_ev_stop = nullptr;
+    if (s_ev_start == nullptr) {
+        cudaEventCreate(&s_ev_start);
+        cudaEventCreate(&s_ev_stop);
+    }
+    const int mod = current_step % 1000;
+    if (mod == 0) cudaEventRecord(s_ev_start);
+
+    // 1. readout 前向 (当前帧): 调质 6 维 + PAD 3 维 + 工具 7 类 logits
+    launch_curriculum_readout_forward_frame(buf);
+    launch_curriculum_pad_forward_frame(buf);
+
+    // 2. 课程误差 + 总 loss (每步目标 = 当前 100 步块的模拟浓度/PAD, Task 5)
+    //    分段监督: 与内部注入同步推进 (main.cpp 每 rel%100==0 调 advance_curriculum_target),
+    //    避免早期步浓度低 → 固定 jsonl 末目标造成虚假大误差
+    //    loss 同步回读仅每窗口一次 (current_step % window == 0), 其余步 nullptr
+    //    避免每步 cudaMemcpy DeviceToHost 同步阻塞 GPU 流水线
+    float* p_loss = (bptt_window_size > 0 && current_step % bptt_window_size == 0)
+                        ? &curriculum_last_loss_ : nullptr;
+    launch_curriculum_error(buf, curriculum_target_mod_curr_, curriculum_target_tool_,
+                            curriculum_target_pad_curr_,
+                            curriculum_w_mod_, curriculum_w_tool_, curriculum_w_pad_,
+                            p_loss);
+
+    // 3. 教学信号 → 神经元级 eligibility (事件门控, 2026-08-02 恢复)
+    //    allow_elig_inject=true 仅当窗口内课程事件已注入 (main.cpp 事件注入
+    //    循环 evt.step_offset == rel 置位); 事件前不注入, 消除 §7.1 虚假误差
+    //    (网络未看到事件却被要求预测事件后的调质状态 → 污染突触学习)
+    //    事件注入后本步立即注入 eligibility → 下次 STDP 读取, 教学信号恢复
+    //    decay/gain 与 n3f_embodied_step 同尺度 (τ=20, 课程增益 g=0.1 §3)
+    //    backprop_signal 含 PAD 项: Σ_p w_pad·W_pad[i,p]·err_pad[p] (Task 6)
+    if (allow_elig_inject) {
+        const float decay = expf(-1.0f / NEURON_ELIB_TAU);
+        const float gain = 0.1f;  // 课程增益 (N3F 文档 §3)
+        launch_curriculum_eligibility_update(buf, decay, gain,
+                                             curriculum_w_mod_, curriculum_w_tool_,
+                                             curriculum_w_pad_);
+    }
+
+    // [N3F perf] 每 1000 步末统计 n3f 部分耗时
+    if (mod == 999) {
+        cudaEventRecord(s_ev_stop);
+        cudaEventSynchronize(s_ev_stop);
+        float ms = 0.0f;
+        cudaEventElapsedTime(&ms, s_ev_start, s_ev_stop);
+        printf("[N3F] step=%d n3f_online_step 1000 步耗时 = %.1f ms (%.3f ms/步)\n",
+               current_step, ms, ms / 1000.0f);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// N3F 具身奖励 → 神经元级 eligibility (第三因子, spec §7.1, 2026-08-01)
+//   沙盒 feedback() (内稳态改善) → reward → eligibility → 下次 STDP 调制突触证据
+//   在 scheduler.step() 之前调用 (main.cpp 具身循环, 沙盒 feedback 后),
+//   本次 STDP 立即读取新 eligibility — 无滞后 (优于原课程模式)
+//   生物对应: DA 奖赏预测误差广播 (uniform), reward>0 强化 / reward<0 削弱
+// -----------------------------------------------------------------------------
+void BioMechanismScheduler::n3f_embodied_step(float reward) {
+    if (!n3f_mode()) return;
+    PersistentBuffers& buf = alloc_->buffers();
+    if (!buf.d_neuron_eligibility) return;
+
+    const float decay_factor = expf(-1.0f / NEURON_ELIB_TAU);
+    const float gain = 0.1f;   // 与课程教学信号同尺度
+    launch_embodied_eligibility_update(buf, reward, decay_factor, gain);
+}
+
+// 具身感知注入 (2026-08-01 修复):
+//   缓存感知向量, step() 内 delay_inject 之后注入 (避免被 input_current 清零覆盖)
+void BioMechanismScheduler::set_embodied_sensory(const float sensory[50]) {
+    for (int i = 0; i < 50; ++i) h_embodied_sensory_[i] = sensory[i];
+    embodied_sensory_active_ = true;
 }
 
 } // namespace stage2e

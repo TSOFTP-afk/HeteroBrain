@@ -43,8 +43,22 @@ struct RunConfig {
     std::string curriculum_path;        // --curriculum PATH (课程 JSONL)
     int curriculum_stage = 1;           // --stage 1=初中(默认) 2=高中 0=启蒙 3=成年
     float curriculum_lr = 0.001f;       // --curriculum-lr readout 学习率
+    int curriculum_readout_warmup_steps = 0;  // --curriculum-readout-warmup N
+                                        //   N3F: 前 N 步冻结 readout 更新 (纯前向),
+                                        //   避免随机初始化 readout 的早期误差 (spec §7.7)
     bool curriculum_eval = false;       // --curriculum-eval 评估模式 (冻结权重, 统计工具/调质准确率)
-    int  curriculum_eval_samples = 20;  // --curriculum-eval-samples N 评估样本数
+    int  curriculum_eval_samples = 100; // --curriculum-eval-samples N 评估样本数
+                                        //   2026-08-01 spec §7.3: 默认 20 → 100
+                                        //   (20 样本统计意义不足: 12 个 target=6 全对即可达 60% 准确率)
+    std::string learning_rule = "bptt"; // --learning-rule bptt|n3f (默认 bptt)
+                                        //   bptt: 窗口重放反传 (Phase 3a-D3 现行)
+                                        //   n3f : 调质门控三因子在线学习 (Neuromodulator-Gated
+                                        //         3-Factor): 每步课程误差 → neuron_eligibility →
+                                        //         STDP 证据调制, 无窗口无重放无历史缓冲
+                                        //   ⚠ N3F 参数复用语义 (spec §7.10):
+                                        //     - bptt_window_size: N3F 中作为 readout 更新间隔 (窗口概念一致)
+                                        //     - bptt_lr: N3F 不使用 (N3F 不初始化 BPTT trainer, 该参数被忽略)
+                                        //     - curriculum_lr: N3F 中作为 readout 学习率 (语义一致)
     // ==================== Phase 3a-D1: 具身发育训练 ====================
     bool embodied_mode = false;
     std::string embodied_scene = "hunger_feeding";  // 默认场景

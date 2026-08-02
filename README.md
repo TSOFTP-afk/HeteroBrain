@@ -199,19 +199,30 @@ python scripts/download_models.py --model minicpm5-1b-int4
 
 ### 3. 构建
 
+> 当前可构建目标是 SNN 训练子系统 `snn_train`（独立可执行，不依赖 llama.cpp）。
+> 顶层 `heterobrain_engine`（LLM + 桥接 + 引擎）待 Phase 3b-3f 实现后构建。
+
 ```powershell
-# Windows (x64 VS DevShell)
+# Windows (x64 VS DevShell) — 构建 SNN 训练子系统
+cmake -S src/snn -B build/snn -G Ninja -DCMAKE_BUILD_TYPE=Release
+ninja -C build/snn snn_train
+
+# 顶层构建（当前仅生成 snn_subsystem / llm_subsystem / bridge_subsystem 空库,
+# heterobrain_engine 待实现）
 mkdir build; cd build
 cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
-ninja heterobrain_engine
+# ninja heterobrain_engine   # 待实现 (Phase 3b-3f)
 
 # Linux
-./scripts/build.sh
+# ./scripts/build.sh
 ```
 
 ### 4. 运行最小对话
 
+> `heterobrain_engine` 尚未实现（Phase 3b-3f），以下命令为待实现后的运行示例。
+
 ```powershell
+# 待实现 (Phase 3b-3f): 当前无此可执行文件
 .\build\heterobrain_engine `
     --llm models/minicpm5-1b-q4_k_m.gguf `
     --config configs/default.yaml `

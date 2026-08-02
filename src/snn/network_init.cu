@@ -162,6 +162,7 @@ void init_synapses_host(std::vector<BioSynapse>& h_synapses,
                        std::vector<uint8_t>& h_delay,
                        std::vector<float>& h_alpha,
                        std::vector<float>& h_beta,
+                       float psw_evidence_total,   // PSW 初始 α+β 总证据 (课程模式按阶段, 非课程默认 0.1)
                        uint32_t seed) {
     // 简单的确定性 PRNG (避免引入 curand 依赖到 host)
     // xorshift32 的零状态会永久锁死，用户传入 0 时映射到固定非零状态。
@@ -317,11 +318,12 @@ void init_synapses_host(std::vector<BioSynapse>& h_synapses,
         set_ne_receptor(s, NE_RECEPTOR_INIT);
         set_ht5_receptor(s, HT5_RECEPTOR_INIT);
         set_gaba_receptor(s, GABA_RECEPTOR_INIT);  // Phase 3a
-        // PSW 初始化: α/(α+β) = |w|/W_MAX, 总证据 α+β=0.1 (弱先验)
+        // PSW 初始化: α/(α+β) = |w|/W_MAX, 总证据 α+β = psw_evidence_total
+        // (课程模式按阶段 profile: 启蒙 0.1 / 初中 0.3 / 高中 1.0 / 成年 2.0; 非课程默认 0.1 弱先验)
         float w_ratio = fabsf(weight) / STDP_W_MAX_2E;
         if (w_ratio > 0.999f) w_ratio = 0.999f;
-        h_alpha[idx] = w_ratio * PSW_EVIDENCE_INIT_TOTAL;
-        h_beta[idx]  = (1.0f - w_ratio) * PSW_EVIDENCE_INIT_TOTAL;
+        h_alpha[idx] = w_ratio * psw_evidence_total;
+        h_beta[idx]  = (1.0f - w_ratio) * psw_evidence_total;
         h_weights_cache[idx] = weight;
         h_delay[idx] = delay;
     };
@@ -484,6 +486,7 @@ int init_synapses(BioSynapse* d_synapses,
                    float* d_synapse_alpha,
                    float* d_synapse_beta,
                    const NeuronStateAdEx* d_neurons,
+                   float psw_evidence_total,   // PSW 初始 α+β 总证据 (课程模式按阶段)
                    uint32_t seed) {
     (void)d_neurons;  // P1 不依赖 d_neurons 内容做初始化
 
@@ -497,7 +500,7 @@ int init_synapses(BioSynapse* d_synapses,
     std::vector<float> h_beta;
 
     printf("[Stage2e P1] 生成突触拓扑 (host 端, ~10.7M 突触)...\n");
-    init_synapses_host(h_syn, h_row, h_col, h_w, h_d, h_alpha, h_beta, seed);
+    init_synapses_host(h_syn, h_row, h_col, h_w, h_d, h_alpha, h_beta, psw_evidence_total, seed);
 
     int n_syn = static_cast<int>(h_syn.size());
     printf("[Stage2e P1] 实际生成: %d 突触, %d row_ptr 项\n", n_syn, static_cast<int>(h_row.size()));
@@ -761,7 +764,7 @@ void init_buffers_zero(MemoryAllocator* alloc) {
 // -----------------------------------------------------------------------------
 // Host: 完整初始化入口
 // -----------------------------------------------------------------------------
-void init_network(MemoryAllocator* alloc, uint32_t seed) {
+void init_network(MemoryAllocator* alloc, float psw_evidence_total, uint32_t seed) {
     printf("[Stage2e P1] === 网络初始化 ===\n");
 
     PersistentBuffers& b = alloc->buffers();
@@ -773,7 +776,7 @@ void init_network(MemoryAllocator* alloc, uint32_t seed) {
     int n_syn = init_synapses(b.d_synapses, b.d_csr_row_ptr, b.d_csr_col_idx,
                               b.d_weights_cache, b.d_synapse_delay,
                                b.d_synapse_alpha, b.d_synapse_beta,
-                               b.d_neurons, seed);
+                               b.d_neurons, psw_evidence_total, seed);
     if (n_syn != N_TOTAL_SYNAPSES_2E) {
         fprintf(stderr, "[Stage2e P1 WARN] 突触数 %d != 目标 %d\n", n_syn, N_TOTAL_SYNAPSES_2E);
     }

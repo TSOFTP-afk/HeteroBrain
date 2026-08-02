@@ -42,6 +42,7 @@ set(SNN_TRAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/scheduler_checkpoint.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/bptt_trainer.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/bptt_curriculum.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/csv_stats.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/curriculum_loader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/synapse_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/neuron_kernels.cu
@@ -106,6 +107,7 @@ endif()
 add_executable(test_event_scheduler
     ${CMAKE_CURRENT_SOURCE_DIR}/test_event_scheduler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/event_scheduler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/curriculum_loader.cpp
 )
 target_include_directories(test_event_scheduler PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)

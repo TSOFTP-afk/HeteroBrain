@@ -7,33 +7,34 @@
 #   pca_projection   - PCA 签名空间投影 (LLM embedding ↔ SNN PCA)
 # =============================================================================
 
+# Phase 3 实现后恢复源文件列表 (当前 BRIDGE_SRCS 为空, 走下方 else() 空库分支):
 set(BRIDGE_SRCS
-    spike_embedding.cpp
-    truth_filter.cpp
-    pca_projection.cpp
+    # spike_embedding.cpp
+    # truth_filter.cpp
+    # pca_projection.cpp
 )
 
 set(BRIDGE_HEADERS
-    spike_embedding.h
-    truth_filter.h
-    pca_projection.h
+    # spike_embedding.h
+    # truth_filter.h
+    # pca_projection.h
 )
 
 if(BRIDGE_SRCS)
     add_library(bridge_subsystem STATIC ${BRIDGE_SRCS} ${BRIDGE_HEADERS})
 else()
-    add_library(bridge_subsystem STATIC INTERFACE)
+    add_library(bridge_subsystem INTERFACE)
 endif()
 
 target_include_directories(bridge_subsystem
-    PUBLIC
+    INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/snn
         ${CMAKE_SOURCE_DIR}/src/llm
 )
 
 target_link_libraries(bridge_subsystem
-    PUBLIC
+    INTERFACE
         snn_subsystem
         llm_subsystem
 )

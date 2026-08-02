@@ -34,6 +34,7 @@ int  init_synapses(BioSynapse* d_synapses,
                    float* d_synapse_alpha,    // PSW: LTP 证据累积
                    float* d_synapse_beta,     // PSW: LTD 证据累积
                    const NeuronStateAdEx* d_neurons,
+                   float psw_evidence_total = PSW_EVIDENCE_INIT_TOTAL,  // PSW 初始 α+β 总证据 (课程按阶段)
                    uint32_t seed = 42);
 
 // 初始化 GPU 缓冲为零 (调质浓度, 输入电流, nmda_current, etc.)
@@ -62,7 +63,9 @@ int  init_l5_to_motor_synapses(BioSynapse* d_l5_to_motor_synapses,
                               uint32_t seed = 42);
 
 // P1 完整初始化入口 (调用上述三个 + 运动皮层初始化)
-void init_network(MemoryAllocator* alloc, uint32_t seed = 42);
+void init_network(MemoryAllocator* alloc,
+                  float psw_evidence_total = PSW_EVIDENCE_INIT_TOTAL,  // PSW 初始 α+β 总证据 (课程按阶段)
+                  uint32_t seed = 42);
 
 } // namespace stage2e
 

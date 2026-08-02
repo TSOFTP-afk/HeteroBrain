@@ -7,35 +7,39 @@
 #   main    - CLI 入口 (--interactive / --batch / --eval)
 # =============================================================================
 
+# Phase 3b-3f 实现后恢复源文件列表 (当前模块未实现, ENGINE_SRCS 为空):
 set(ENGINE_SRCS
-    engine.cpp
-    config.cpp
-    main.cpp
+    # engine.cpp
+    # config.cpp
+    # main.cpp
 )
 
 set(ENGINE_HEADERS
-    engine.h
-    config.h
+    # engine.h
+    # config.h
 )
 
-add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS})
+# 仅在源文件就绪时才定义可执行目标 (Phase 3b-3f 前优雅跳过)
+if(ENGINE_SRCS)
+    add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS})
 
-target_link_libraries(heterobrain_engine
-    PRIVATE
-        snn_subsystem
-        llm_subsystem
-        bridge_subsystem
-)
+    target_link_libraries(heterobrain_engine
+        PRIVATE
+            snn_subsystem
+            llm_subsystem
+            bridge_subsystem
+    )
 
-target_include_directories(heterobrain_engine
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}
-)
+    target_include_directories(heterobrain_engine
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+    )
 
-# 安装
-install(TARGETS heterobrain_engine
-    RUNTIME DESTINATION bin
-)
+    # 安装
+    install(TARGETS heterobrain_engine
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 # TODO: Phase 1 实现 main.cpp 的最小骨架:
 #   1. 解析命令行: --llm <gguf> --config <yaml> --interactive

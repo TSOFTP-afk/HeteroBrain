@@ -375,7 +375,9 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
                        float pred_succ, float kl_divergence,
                        float da_delta,
                        float prediction_error_norm,
-                       float empathy_signal)
+                       float empathy_signal,
+                       const float* stage_baseline,
+                       bool deterministic)
 {
     PersistentBuffers& b = alloc->buffers();
     // DA 释放覆盖 [0, N_TOTAL_NEURONS_2E) = [0, 60000)
@@ -442,33 +444,54 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
     }
 
     // 调质信号计算
+    // Phase 3a-D3: 课程模式阶段基线 (顺序映射 profile.baseline_mod = [DA, 5HT, NE, ACh, GABA, Oxy])
+    //   注意: 内部变量顺序是 da/ach/ne/ht5/gaba/oxy, 与数组索引非直接对应
+    //   非课程模式 (stage_baseline == nullptr): 使用 config.h 默认常量, 行为与修复前一致
+    float base_da   = stage_baseline ? stage_baseline[0] : DA_BASE;
+    float base_ht5  = stage_baseline ? stage_baseline[1] : 0.1f;
+    float base_ne   = stage_baseline ? stage_baseline[2] : 0.05f;
+    float base_ach  = stage_baseline ? stage_baseline[3] : 0.2f;
+    float base_gaba = stage_baseline ? stage_baseline[4] : GABA_BASE;
+    float base_oxy  = stage_baseline ? stage_baseline[5] : OXYTOCIN_BASE;
+
     // DA 信号 = 基线 + 预测误差耦合 + TD error 驱动
-    float da_signal = DA_BASE + DA_GAIN * (1.0f - prediction_error_norm);
-    da_signal += (da_delta > 0 ? da_delta : 0.3f * da_delta);
-    if (da_signal < 0.0f) da_signal = 0.0f;
+    // 课程模式 (deterministic): 关闭网络依赖动力学项, 浓度 = 阶段基线 + 事件
+    float da_signal;
+    if (deterministic) {
+        da_signal = base_da;   // 关闭 DA_GAIN·(1-pred_err) 与 TD delta 项
+    } else {
+        da_signal = base_da + DA_GAIN * (1.0f - prediction_error_norm);
+        da_signal += (da_delta > 0 ? da_delta : 0.3f * da_delta);
+        if (da_signal < 0.0f) da_signal = 0.0f;
+    }
 
-    // ACh: 基线 0.2 + 惊奇 (novelty) + 注意力 (余弦相似度预测成功率)
-    float ach_signal = 0.2f + 0.3f * novelty + 0.1f * h_pred_succ_cos;
-    // Phase 3a-D1: 好奇心驱动的ACh (持续信号, 不清零)
-    ach_signal += h_curiosity_ach;
+    // ACh: 基线 + 惊奇 (novelty) + 注意力 (余弦相似度预测成功率)
+    // 课程模式: 关闭 novelty/pred_succ/curiosity 项
+    float ach_signal;
+    if (deterministic) {
+        ach_signal = base_ach;   // 关闭 novelty/pred_succ/curiosity
+    } else {
+        ach_signal = base_ach + 0.3f * novelty + 0.1f * h_pred_succ_cos;
+        ach_signal += h_curiosity_ach;
+    }
 
-    // NE: 基线 0.05 + KL 散度触发
-    float ne_signal = 0.05f;
-    if (kl_divergence > 0.5f) {
+    // NE: 基线 + KL 散度触发
+    float ne_signal = base_ne;
+    if (!deterministic && kl_divergence > 0.5f) {
         ne_signal += 0.5f * kl_divergence;
     }
 
-    // 5HT: 基线 0.1 + 预测误差持续负时上升
-    float ht5_signal = 0.1f;
-    if (da_delta < -0.5f) {
+    // 5HT: 基线 + 预测误差持续负时上升
+    float ht5_signal = base_ht5;
+    if (!deterministic && da_delta < -0.5f) {
         ht5_signal += 0.3f * fabsf(da_delta);
     }
 
     // Phase 3a: GABA 信号 = 基线 + NE 反馈 (抗焦虑负反馈)
     //   NE 越高 → GABA 越高 (抑制过度唤醒, 防止焦虑循环)
     //   使用上一轮 NE 均值 (h_last_ne_mean) 避免本轮 NE 信号自身依赖
-    float gaba_signal = GABA_BASE;
-    if (h_last_ne_mean > 0.3f) {
+    float gaba_signal = base_gaba;
+    if (!deterministic && h_last_ne_mean > 0.3f) {
         gaba_signal += GABA_GAIN * (h_last_ne_mean - 0.3f);
     }
 
@@ -476,8 +499,11 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
     //   empathy_signal 来自 set_empathy_signal() (由 LLM/用户反馈触发)
     //   若调用方未传 empathy_signal, 使用内部缓存的 h_empathy_signal
     float eff_empathy = (empathy_signal > 0.0f) ? empathy_signal : h_empathy_signal;
-    float oxytocin_signal = OXYTOCIN_BASE + OXYTOCIN_GAIN * eff_empathy;
-    // 读取后清零内部缓存 (单次触发模型)
+    float oxytocin_signal = base_oxy;
+    if (!deterministic) {
+        oxytocin_signal += OXYTOCIN_GAIN * eff_empathy;
+    }
+    // 无论是否 deterministic, 读取后清零内部缓存 (单次触发模型)
     h_empathy_signal = 0.0f;
 
     // Phase 3a-C1: 读取事件驱动 6 维调质增量 (优先级高于 empathy)

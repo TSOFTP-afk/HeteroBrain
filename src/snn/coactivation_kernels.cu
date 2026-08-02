@@ -396,14 +396,23 @@ __global__ void csr_rebuild_kernel(
     // remap_table[s] == -1: 修剪, 跳过
     // 双 sync 迭代: 本轮所有线程先读源 → sync → 写目标 → sync → 下一轮
     // 第 k 轮读写区间 [k*bs, (k+1)*bs): 目标 <= 源, 下一轮源区间不被本轮写覆盖
-    for (int s = tid; s < n_old; s += bs) {
-        BioSynapse local = d_synapses[s];   // 读源 (先读, 存入 thread-local 变量)
-        __syncthreads();                      // 确保本轮所有读完成
-        int target = d_remap_table[s];
+    //
+    // 2026-08-01 死锁修复 (20K 重跑 12000 步复发):
+    //   原写法 for (s = tid; s < n_old; s += bs) 在 n_old % bs != 0 时
+    //   线程迭代次数差 1: 最后一轮仅部分线程进入循环体执行 __syncthreads,
+    //   其余线程已退出循环 → barrier 计数错位 → 死锁 (UB).
+    //   修复: 统一迭代次数 n_iter, 越界线程空转只参与 barrier, 不读写.
+    const int n_iter = (n_old + bs - 1) / bs;  // 所有线程相同迭代次数
+    for (int it = 0; it < n_iter; ++it) {
+        const int s = tid + it * bs;
+        BioSynapse local;
+        if (s < n_old) local = d_synapses[s]; // 读源 (越界线程不读)
+        __syncthreads();                        // 确保本轮所有读完成
+        int target = (s < n_old) ? d_remap_table[s] : -1;
         if (target >= 0) {
-            d_synapses[target] = local;       // 写目标 (后写, target <= s)
+            d_synapses[target] = local;         // 写目标 (后写, target <= s)
         }
-        __syncthreads();                      // 确保本轮所有写完成, 下一轮读才安全
+        __syncthreads();                        // 确保本轮所有写完成, 下一轮读才安全
     }
 
     // --- Phase B: 写入新突触 ---
@@ -467,6 +476,154 @@ void launch_structural_rebuild(
 }
 
 // -----------------------------------------------------------------------------
+// 重建后对齐数组重排 (修复 GPU hang)
+// csr_rebuild_kernel 只重排 d_synapses + d_row_ptr; STDP/NMDA kernel 按突触索引
+// 直读 d_csr_col_idx (post 索引) 与其他 10.7M 对齐数组. 若不同步重排,
+// 重建后 col_idx 与 d_synapses 错位 → spike_flags[post] 越界 → GPU hang.
+//
+// 2026-08-01 hang 修复 (从零训练 12000 步复发):
+//   原实现多 block 并行搬运, 注释声称 "target <= source 故安全" —— 论证有误!
+//   compaction 场景存在跨 block 读写竞争:
+//     线程 A (源 s=100, 目标 t=90): 写 a.col_idx[90]
+//     线程 B (源 s=90, 目标 t=85):  读 a.col_idx[90] (作为源值)
+//     A/B 跨 block 无全局同步 → B 可能读到 A 写的新值 (来自 s=100)
+//     → col_idx 错位 → STDP/NMDA post 索引越界 → GPU hang
+//   此前 100K checkpoint 验证 (101000/102000) 未触发, 因 prune 幅度小
+//   竞争窗口数据碰巧安全; 从零训练 prune 更激进 → 触发.
+//
+// 修复: 改为与 csr_rebuild_kernel 相同的"单 block + 双 __syncthreads"迭代:
+//   每轮所有线程先读源到局部变量 → sync → 写目标 → sync → 下一轮
+//   (compaction 目标 t <= 源 s, 下一轮源区间 [k*bs, (k+1)*bs) 不被本轮写覆盖)
+//   新突触初始化 (Phase B) 目标区间 [surviving_total, new_total) 与
+//   Phase A 的 [0, surviving_total) 不重叠, 无竞争, 保持并行.
+//   性能: 单 block 处理 10.7M × 12 数组, 每轮 1024 源, ~10.4K 轮 × 2 sync,
+//   估计 ~200ms, 在 1000 步重建周期 (~90s) 内可接受 (正确性优先).
+// -----------------------------------------------------------------------------
+__global__ void remap_aligned_arrays_kernel(
+    const int* __restrict__ remap_table,      // [n_old + new_count] 目标映射
+    int n_old,
+    int new_count,
+    int n_new_total,
+    const int* __restrict__ new_pairs,        // [2 * new_count] (pre, post)
+    AlignedSynapseArrays a)
+{
+    const int tid = threadIdx.x;
+    const int bs  = blockDim.x;
+
+    // 1. 存活突触搬运 (单 block 双 sync, 消除跨线程读写竞争)
+    //    无条件读源 (修剪的线程也读, 保证 __syncthreads 同步点一致)
+    // 2026-08-01 死锁修复: 原 for (s = tid; s < n_old; s += bs) 在
+    //   n_old % bs != 0 时线程迭代次数差 1 → barrier 计数错位死锁 (UB).
+    //   统一迭代次数 n_iter, 越界线程空转只参与 barrier, 不读写.
+    const int n_iter = (n_old + bs - 1) / bs;  // 所有线程相同迭代次数
+    for (int it = 0; it < n_iter; ++it) {
+        const int s = tid + it * bs;
+        int    t   = -1;
+        int    col = 0;
+        float  wc  = 0.0f, xp = 0.0f, el = 0.0f, els = 0.0f;
+        float  al  = 0.0f, be = 0.0f, ca = 0.0f, cam = 0.0f;
+        int    te  = 0;
+        uint8_t ox = 0, sd = 0;
+        if (s < n_old) {
+            t  = remap_table[s];
+            col = a.col_idx[s];
+            wc  = a.weights_cache[s];
+            te  = a.trace_epoch[s];
+            xp  = a.x_pre_trace[s];
+            el  = a.eligibility[s];
+            els = a.eligibility_slow[s];
+            al  = a.synapse_alpha[s];
+            be  = a.synapse_beta[s];
+            ca  = a.ca_snapshot[s];
+            ox  = a.oxytocin_receptor[s];
+            sd  = a.synapse_delay[s];
+            cam = a.camkii_activity[s];
+        }
+        __syncthreads();                      // 确保本轮所有读完成
+        if (t >= 0) {
+            a.col_idx[t]           = col;
+            a.weights_cache[t]     = wc;
+            a.trace_epoch[t]       = te;
+            a.x_pre_trace[t]       = xp;
+            a.eligibility[t]       = el;
+            a.eligibility_slow[t]  = els;
+            a.synapse_alpha[t]     = al;
+            a.synapse_beta[t]      = be;
+            a.ca_snapshot[t]       = ca;
+            a.oxytocin_receptor[t] = ox;
+            a.synapse_delay[t]     = sd;
+            a.camkii_activity[t]   = cam;
+        }
+        __syncthreads();                      // 确保本轮所有写完成, 下一轮读才安全
+    }
+
+    // 2. 新突触初始化 (镜像 d_synapses[target] 的权重/延迟, csr_rebuild_kernel 已写入)
+    //    目标区间 [surviving_total, new_total) 与 Phase 1 写区间 [0, surviving_total)
+    //    不重叠, 无读写竞争, 可多线程并行
+    for (int k = tid; k < new_count; k += bs) {
+        int t = remap_table[n_old + k];
+        if (t < 0) continue;
+        const BioSynapse& s = a.synapses[t];
+        a.col_idx[t]           = new_pairs[2 * k + 1];
+        a.weights_cache[t]     = s.weight;
+        a.trace_epoch[t]       = 0;
+        a.x_pre_trace[t]       = 0.0f;
+        a.eligibility[t]       = 0.0f;
+        a.eligibility_slow[t]  = 0.0f;
+        a.synapse_alpha[t]     = PSW_ALPHA_MIN;
+        a.synapse_beta[t]      = PSW_BETA_MIN;
+        a.ca_snapshot[t]       = 0.0f;
+        a.oxytocin_receptor[t] = 0;
+        a.synapse_delay[t]     = static_cast<uint8_t>(s.delay_steps);
+        a.camkii_activity[t]   = 0.0f;
+    }
+}
+
+// 尾部 [n_new_total, n_alloc) 清零 (独立 kernel, 避免与存活搬运的源读竞争)
+__global__ void zero_aligned_tail_kernel(int n_new_total, int n_alloc,
+                                         AlignedSynapseArrays a)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int stride = gridDim.x * blockDim.x;
+    for (int s = n_new_total + i; s < n_alloc; s += stride) {
+        a.col_idx[s]           = 0;
+        a.weights_cache[s]     = 0.0f;
+        a.trace_epoch[s]       = 0;
+        a.x_pre_trace[s]       = 0.0f;
+        a.eligibility[s]       = 0.0f;
+        a.eligibility_slow[s]  = 0.0f;
+        a.synapse_alpha[s]     = PSW_ALPHA_MIN;
+        a.synapse_beta[s]      = PSW_BETA_MIN;
+        a.ca_snapshot[s]       = 0.0f;
+        a.oxytocin_receptor[s] = 0;
+        a.synapse_delay[s]     = 0;
+        a.camkii_activity[s]   = 0.0f;
+    }
+}
+
+void launch_remap_aligned_arrays(const AlignedSynapseArrays& a,
+                                 const int* d_remap_table, const int* d_new_pairs,
+                                 int n_old, int new_count, int n_new_total,
+                                 int n_alloc, cudaStream_t stream)
+{
+    if (!a.col_idx || !a.synapses || !d_remap_table) return;
+
+    // 2026-08-01 hang 修复: 单 block 双 sync (与 csr_rebuild_kernel 一致)
+    //   多 block 并行 compaction 存在跨 block 读写竞争 → col_idx 错位 → 越界 hang
+    remap_aligned_arrays_kernel<<<1, THREADS_PER_BLOCK_2E, 0, stream>>>(
+        d_remap_table, n_old, new_count, n_new_total, d_new_pairs, a);
+    CUDA_CHECK_LAST_2E();
+
+    if (n_alloc > n_new_total) {
+        int blocks = (n_alloc - n_new_total + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
+        if (blocks > 65535) blocks = 65535;
+        zero_aligned_tail_kernel<<<blocks, THREADS_PER_BLOCK_2E, 0, stream>>>(
+            n_new_total, n_alloc, a);
+        CUDA_CHECK_LAST_2E();
+    }
+}
+
+// -----------------------------------------------------------------------------
 // CSR 重建 host wrapper (5% 判定 + CPU 构建 row_ptr/remap_table + GPU 迁移)
 // -----------------------------------------------------------------------------
 bool launch_csr_rebuild(
@@ -475,6 +632,7 @@ bool launch_csr_rebuild(
     const int* d_prune_marks, int n_neurons,
     int n_synapses_total,
     int* /*d_new_row_ptr*/, int* /*d_remap_table*/,
+    const AlignedSynapseArrays& aligned, int n_alloc,
     cudaStream_t stream)
 {
     if (!d_synapses || !d_row_ptr || !d_prune_marks || n_synapses_total <= 0) {
@@ -592,6 +750,17 @@ bool launch_csr_rebuild(
         d_prune_marks, n_neurons, d_new_row_ptr, d_remap_table);
     CUDA_CHECK_2E(cudaStreamSynchronize(stream));  // 重建完成才能释放临时缓冲
 
+    // --- Step 7.5: 重排按突触索引对齐的数组 (修复 GPU hang) ---
+    // csr_rebuild_kernel 只重排 d_synapses + d_row_ptr; 不同步重排 d_csr_col_idx
+    // 等 10.7M 对齐数组会导致 STDP/NMDA kernel 的 post 索引错位/越界 → GPU hang.
+    // 新突触总数 = h_new_row_ptr[n_neurons] (CPU 端 Step 5 已构建)
+    const int n_new_total = h_new_row_ptr[n_neurons];
+    if (aligned.col_idx) {
+        launch_remap_aligned_arrays(aligned, d_remap_table, d_new_pairs,
+                                    n_old, new_count, n_new_total, n_alloc, stream);
+        CUDA_CHECK_2E(cudaStreamSynchronize(stream));
+    }
+
     // --- Step 8: 释放临时缓冲 ---
     CUDA_CHECK_2E(cudaFree(d_new_row_ptr));
     CUDA_CHECK_2E(cudaFree(d_remap_table));
@@ -697,13 +866,14 @@ int launch_csr_rebuild_with_integrity_check(
     const int* d_new_pairs, int new_count,
     const int* d_prune_marks, int n_neurons,
     int n_synapses_total,
+    const AlignedSynapseArrays& aligned, int n_alloc,
     cudaStream_t stream)
 {
 #if !CSR_INTEGRITY_CHECK_ENABLED
     // 校验禁用: 直接调用 launch_csr_rebuild, 不做校验
     (void)launch_csr_rebuild(d_synapses, d_row_ptr, d_new_pairs, new_count,
                               d_prune_marks, n_neurons, n_synapses_total,
-                              nullptr, nullptr, stream);
+                              nullptr, nullptr, aligned, n_alloc, stream);
     return 0;
 #else
     // --- Step A: 保存旧 CSR 副本 (用于校验失败时回滚) ---
@@ -740,7 +910,7 @@ int launch_csr_rebuild_with_integrity_check(
     // --- Step B: 执行 CSR 重建 ---
     bool rebuilt = launch_csr_rebuild(d_synapses, d_row_ptr, d_new_pairs, new_count,
                                        d_prune_marks, n_neurons, n_synapses_total,
-                                       nullptr, nullptr, stream);
+                                       nullptr, nullptr, aligned, n_alloc, stream);
     if (!rebuilt) {
         // 变更不足 5%, 跳过重建, 无需校验, 释放旧副本
         CUDA_CHECK_2E(cudaFree(d_old_synapses));

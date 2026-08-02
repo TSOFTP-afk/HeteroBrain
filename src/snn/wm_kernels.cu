@@ -260,4 +260,43 @@ void launch_wm_maintain(WMSlot* d_slots, const float* d_pca_W,
     CUDA_CHECK_LAST_2E();
 }
 
+// -----------------------------------------------------------------------------
+// 前额叶注入合并 (2026-08-01 修复)
+// 死代码根因: wm_maintain_kernel 只写 d_prefrontal_input (WM 重建的前额叶发放率),
+//   但该缓冲从未并入 d_input_current → 前额叶神经元 (全局索引 50000-54999) 零输入,
+//   20K 实测 prefront 活跃 N=0 (P3-C 层间激活延迟 "prefront -1.00 0")
+// 修复: 在 delay_inject (清零 input_current) 之后, 把 d_prefrontal_input[i] 累加到
+//   d_input_current[pf_start + i] (前额叶神经元区间), 让 WM 重放真正驱动前额叶.
+// 缩放: d_prefrontal_input 存的是重建发放率 (mean_fr ~0.003-0.17), 而 lif_adex 需要
+//   ~9.0 量级电流才能触发 (对照 POP_CODING_GAIN=80). 实测 recon×act×0.5 ~ 0.05-2.5,
+//   ×80 每步注入过强 (前额叶持续爆发 → PCA W_norm 4e9/NaN 发散). 折中 ×20:
+//   前额叶 ~1-50 电流/步 → 适度发放, 网络活动仅轻微上升.
+// -----------------------------------------------------------------------------
+#define PREFRONTAL_INJECT_GAIN 20.0f
+
+__global__ void merge_prefrontal_input_kernel(
+    const float* __restrict__ d_pf_input,     // [n_pf] WM 重建的前额叶发放率
+    float* __restrict__ d_input_current,      // [N] 主网络输入电流 (延迟注入后)
+    int n_pf,                                 // N_PREFRONTAL_NEURONS = 5000
+    int pf_start)                             // N_ASSOCIATION_NEURONS_2E = 50000
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= n_pf) return;
+    float v = d_pf_input[i];
+    // NaN 防护: WM 重建若因上游 PCA 异常产生 NaN, 跳过注入 (NaN>0 恒 false, 显式防一下)
+    if (v > 0.0f && v == v) {
+        atomicAdd(&d_input_current[pf_start + i], v * PREFRONTAL_INJECT_GAIN);
+    }
+}
+
+void launch_merge_prefrontal_input(const float* d_pf_input, float* d_input_current,
+                                   int n_pf, int pf_start)
+{
+    if (!d_pf_input || !d_input_current) return;
+    int blocks = (n_pf + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
+    merge_prefrontal_input_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
+        d_pf_input, d_input_current, n_pf, pf_start);
+    CUDA_CHECK_LAST_2E();
+}
+
 } // namespace stage2e

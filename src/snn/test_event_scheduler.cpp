@@ -8,10 +8,14 @@
 // =============================================================================
 #include "event_scheduler.h"
 #include "gene_event_map.h"
+#include "curriculum_loader.h"
+#include "mod_simulator.h"
+#include "personality_profiles.h"
 
 #include <cassert>
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 #include <fstream>
 #include <string>
 
@@ -29,6 +33,13 @@ void set_event_signal(const float modulator_delta[6], int duration_steps) {
     for (int i = 0; i < 6; ++i) g_last_delta[i] = modulator_delta[i];
     g_last_duration = duration_steps;
     g_call_count++;
+}
+
+// reset_event_signal stub (Phase 3a-C2 叠加修复后 dispatch_pending 每步先清零):
+// 重置记录状态, 与 modulatory_kernels.cu 语义一致 (清零事件信号缓存)
+void reset_event_signal() {
+    for (int i = 0; i < 6; ++i) g_last_delta[i] = 0.0f;
+    g_last_duration = -1;
 }
 }
 
@@ -161,6 +172,96 @@ void test_dispatch_pending() {
     std::remove(tmp_path.c_str());
 }
 
+// 测试 6: event_default_modifier_flags 事件类型→默认修饰符映射
+// (对齐 Python generate_curriculum_data.py EVENT_DEFAULT_MOD)
+void test_default_modifier_flags() {
+    TEST(event_default_modifier_flags(EVT_FOOD_TASTY) == 0, "food_tasty flags=0 (private)");
+    TEST(event_default_modifier_flags(EVT_FOOD_BLAND) == 0, "food_bland flags=0 (private)");
+    TEST(event_default_modifier_flags(EVT_NOVELTY) == 0, "novelty flags=0 (private)");
+    TEST(event_default_modifier_flags(EVT_QUESTION) == 0, "question flags=0 (private)");
+    TEST(event_default_modifier_flags(EVT_THREAT_PHYSICAL) == MOD_AUTHORITY,
+         "threat_physical flags=AUTHORITY");
+    TEST(event_default_modifier_flags(EVT_THREAT_SOCIAL) == (MOD_PUBLIC | MOD_AUTHORITY),
+         "threat_social flags=PUBLIC|AUTHORITY");
+    TEST(event_default_modifier_flags(EVT_PRAISE) == (MOD_PUBLIC | MOD_AUTHORITY),
+         "praise flags=PUBLIC|AUTHORITY");
+    TEST(event_default_modifier_flags(EVT_CRITICISM) == (MOD_PUBLIC | MOD_AUTHORITY),
+         "criticism flags=PUBLIC|AUTHORITY");
+    TEST(event_default_modifier_flags(EVT_SOCIAL_BOND) == (MOD_PUBLIC | MOD_SUSTAINED),
+         "social_bond flags=PUBLIC|SUSTAINED");
+    TEST(event_default_modifier_flags(EVT_SOCIAL_LOSS) == (MOD_PUBLIC | MOD_SUSTAINED),
+         "social_loss flags=PUBLIC|SUSTAINED");
+    TEST(event_default_modifier_flags(EVT_ACHIEVEMENT) == MOD_PUBLIC,
+         "achievement flags=PUBLIC");
+}
+
+// 测试 7: C++ CurriculumModSimulator 与 Python 生成器端到端一致性
+// -----------------------------------------------------------------------------
+// 加载 Task 4 重新生成的 curriculum_middle_school.jsonl:
+//   target_modulators = Python ConcentrationSimulator 窗口末浓度,
+//   GENE_MAP 列顺序 [DA, ACh, NE, 5HT, GABA, Oxy], round 到 4 位小数.
+// 窗口语义 (generate_curriculum_data.py L381-390):
+//   400 步 = 4 个 100 步块 (rel=0/100/200/300), 每块注入 step_offset==rel 的事件,
+//   step_offset=400 的事件属窗口外不注入. 与 mod_simulator.h 每 100 步 advance_block 一致.
+// 断言: 窗口末 C++ sim.conc() 与 target_modulators 逐维差值 < 1e-4 (200 样本 × 6 维).
+void test_mod_simulator_consistency() {
+    const char* path = "F:\\thetrueai\\data\\events\\curriculum_middle_school.jsonl";
+    stage2e::CurriculumLoader loader;
+    if (!loader.load_jsonl(path, stage2e::STAGE_MIDDLE_SCHOOL)) {
+        TEST(false, "consistency: load_jsonl failed (curriculum_middle_school.jsonl)");
+        return;
+    }
+    const std::vector<stage2e::CurriculumSample>& samples = loader.samples();
+    if (samples.size() < 200) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "consistency: samples=%zu < 200", samples.size());
+        TEST(false, msg);
+        return;
+    }
+
+    // base_signal: GENE_MAP 列顺序 [DA, ACh, NE, 5HT, GABA, Oxy].
+    // personality_profiles.h baseline_mod 顺序是 [DA, 5HT, NE, ACh, GABA, Oxy] → 重排
+    //   middle_school = {0.22, 0.15, 0.25, 0.28, 0.18, 0.20} → [0.22, 0.28, 0.25, 0.15, 0.18, 0.20]
+    //   与 Python STAGE_BASELINE["middle_school"] 一致.
+    const float* bm = stage2e::personality_profile(stage2e::STAGE_MIDDLE_SCHOOL).baseline_mod;
+    const float base_signal[6] = { bm[0], bm[3], bm[2], bm[1], bm[4], bm[5] };
+
+    static const int kRel[4] = { 0, 100, 200, 300 };
+    static const char* kChName[6] = { "DA", "ACh", "NE", "5HT", "GABA", "Oxy" };
+
+    int checked = 0;
+    float max_diff = 0.0f;
+    for (size_t i = 0; i < 200; ++i) {
+        const stage2e::CurriculumSample& s = samples[i];
+        stage2e::CurriculumModSimulator sim;
+        for (int b = 0; b < 4; ++b) {
+            const int rel = kRel[b];
+            int ev_types[8], ev_intens[8], n = 0;
+            for (const stage2e::CurriculumEvent& evt : s.events) {
+                if (evt.step_offset == rel && n < 8) {
+                    ev_types[n] = evt.event_type;   // EventType 枚举 (int, loader 已转)
+                    ev_intens[n] = evt.intensity;
+                    n++;
+                }
+            }
+            sim.advance_block(ev_types, ev_intens, n, base_signal);
+        }
+        const float* c = sim.conc();
+        for (int ch = 0; ch < 6; ++ch) {
+            const float diff = fabsf(c[ch] - s.target_modulators[ch]);
+            if (diff > max_diff) max_diff = diff;
+            char msg[256];
+            snprintf(msg, sizeof(msg),
+                     "consistency sample_id=%d ch[%s]=%d sim=%.6f target=%.6f diff=%.6f",
+                     s.sample_id, kChName[ch], ch, c[ch], s.target_modulators[ch], diff);
+            TEST(diff < 1e-4f, msg);
+            checked++;
+        }
+    }
+    fprintf(stdout, "[test_event_scheduler] consistency checked %d dims, max|sim-target| = %.6f\n",
+            checked, max_diff);
+}
+
 int main() {
     fprintf(stdout, "[test_event_scheduler] running...\n");
     test_apply_modifiers_intensity();
@@ -168,6 +269,8 @@ int main() {
     test_load_jsonl();
     test_event_type_from_string();
     test_dispatch_pending();
+    test_default_modifier_flags();
+    test_mod_simulator_consistency();
     fprintf(stdout, "[test_event_scheduler] PASS=%d FAIL=%d\n", g_test_pass, g_test_fail);
     return g_test_fail == 0 ? 0 : 1;
 }

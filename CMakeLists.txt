@@ -86,9 +86,12 @@ endif()
 # =============================================================================
 # 安装
 # =============================================================================
-install(TARGETS heterobrain_engine
-    RUNTIME DESTINATION bin
-)
+# heterobrain_engine 目标由 src/heterobrain 的 if(ENGINE_SRCS) 保护, 未实现时优雅跳过
+if(TARGET heterobrain_engine)
+    install(TARGETS heterobrain_engine
+        RUNTIME DESTINATION bin
+    )
+endif()
 
 install(DIRECTORY configs/
     DESTINATION etc/heterobrain

@@ -87,12 +87,25 @@ __global__ void pca_update_kernel(
     __syncthreads();   // 确保 proj 读取完成后才允许复用 s_partial
 
     // ---------- 阶段2: W[i][k] += η · (x[i] - W[i][k]·proj) · proj ----------
+    // 2026-08-02 防护 (对照 CPU 版 launch_pca_update_cpu):
+    //   根因: 具身感知注入修复后, 网络活动分布改变, proj 变大时原无防护 Oja 更新
+    //   (w += lr·(x-w·proj)·proj) 可发散 → W_norm NaN.
+    //   防护: proj 限幅 ±50; 更新后检查有限性, 异常则跳过 (保留旧 W).
+    const float proj_clamp = 50.0f;
+    float proj_c = proj;
+    if (!(proj_c == proj_c)) proj_c = 0.0f;            // NaN → 0
+    if (proj_c >  proj_clamp) proj_c =  proj_clamp;    // 限幅 ±50
+    if (proj_c < -proj_clamp) proj_c = -proj_clamp;
     for (int i = tid; i < n_neurons; i += bs) {
         size_t idx = (size_t)i * n_components + k;
         float w = d_pca_W[idx];
         float x = d_fr_snapshot[i] - d_mean_fr[i];
         // Oja's rule: 投影方向增强, 同时减去正比于当前权重的项 (防发散)
-        d_pca_W[idx] = w + learning_rate * (x - w * proj) * proj;
+        float w_new = w + learning_rate * (x - w * proj_c) * proj_c;
+        // 有限性防护: 异常更新跳过 (防止 NaN/inf 污染 PCA 基矩阵)
+        if (w_new == w_new && w_new > -1e6f && w_new < 1e6f) {
+            d_pca_W[idx] = w_new;
+        }
     }
 }
 

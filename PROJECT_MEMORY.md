@@ -3,11 +3,12 @@
 > 本文件是项目自带记忆文档，随项目目录一起迁移。每个新会话开始时优先读取本文件，
 > 以快速恢复项目上下文。本文件是对 TRAE IDE memory 系统的补充，确保跨路径/跨工具的连续性。
 >
-> **2026-07-31 文档归档**：历史方案文档已统一移至 `docs/archive/`。当前 `docs/` 只保留两份活文档：
+> **2026-07-31 文档归档**：历史方案文档已统一移至 `docs/archive/`。当前 `docs/` 只保留三份活文档：
 > - [docs/developmental-training-master-spec.md](file:///f:/thetrueai/docs/developmental-training-master-spec.md) — 训练范式权威契约
+> - [docs/enlightenment-design-spec.md](file:///f:/thetrueai/docs/enlightenment-design-spec.md) — 启蒙期设计契约（2026-08-01，情绪分层 × 沙盒架构 × 硬编码边界，修订 master-spec 启蒙期部分）
 > - [docs/roadmap.md](file:///f:/thetrueai/docs/roadmap.md) — 项目阶段路线图
 >
-> 本文件保留**硬约束 + 阶段索引 + 工作流约定**，详细技术状态见上述两份活文档。
+> 本文件保留**硬约束 + 阶段索引 + 工作流约定**，详细技术状态见上述三份活文档。
 
 ## 项目定位
 
@@ -60,7 +61,7 @@
   - 训练范式权威契约：[docs/developmental-training-master-spec.md](file:///f:/thetrueai/docs/developmental-training-master-spec.md)
   - 方向推演记录（已归档）：[docs/archive/snn-emotion-and-workspace-direction.md](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md)
   - 3a-A 6 维调质基础 ✅ / 3a-B 稳态补偿 ✅ / 3a-C1 事件驱动注入 ✅ / 3a-C2 事件叠加修复 ✅
-  - 3a-D1 具身发育训练 ✅ / 3a-D2 启蒙期 ⬜ / 3a-D3 课程训练 ⬜ / 3a-D4 成年交付 ⬜ / 3a-D5 个性化 ⬜
+  - 3a-D1 具身发育训练 ✅ / 3a-D2 启蒙期 ⬜ / 3a-D3 课程训练 ⬜（N3F 20K 对照完成，详见 [N3F 设计总览 §7 深层缺陷](file:///f:/thetrueai/docs/N3F-设计总览与实现说明.md#7-深层缺陷分析2026-08-01-代码审查发现)）/ 3a-D4 成年交付 ⬜ / 3a-D5 个性化 ⬜
   - 3b-3g 待启动（认知黑板 / 黑板-LLM 桥接 / 工具编排 / 工具 RL / 海马溢出 / 端到端验证）
 - [ ] **Phase 4** 评测与优化
 - [ ] **Phase 5** 持续学习闭环

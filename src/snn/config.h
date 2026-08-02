@@ -298,6 +298,8 @@ static_assert(COL_L4_SIZE_2E + COL_L23_SIZE_2E + COL_L5_SIZE_2E + COL_L6_SIZE_2E
 //   gain = 0.5:  回弹 LTD 强度, (ca-θ)·gain 作为额外 β 增量
 #define CA_REBOUND_THRESHOLD      0.15f    // 回弹 LTD 触发阈值 (架构修复: 0.5→0.15 适配低活动)
 #define CA_REBOUND_LTD_GAIN       0.5f     // 回弹 LTD 强度系数
+// 单事件回弹 LTD 证据上限, 防止 PSW_ETA_BETA=200 下 beta 巨尾
+#define CA_REBOUND_EVIDENCE_CAP   5.0f
 
 // 2 阶 eligibility trace (v3 强化 H)
 #define STDP_E1_TAU               20.0f    // 快 trace (ms)
@@ -319,10 +321,16 @@ static_assert(COL_L4_SIZE_2E + COL_L23_SIZE_2E + COL_L5_SIZE_2E + COL_L6_SIZE_2E
 // 增益参数 (相对量级控制):
 //   ELIGIBILITY_EVIDENCE_GAIN: 突触级 trace 权重 (替代 PSW_ETA 中的 delta_w)
 //     原 delta_w ≈ 0.03 (单次 STDP), e1 累积后 ≈ 0.3 (10 步累积), 增益 0.1 让 evidence 量级不变
+//     2026-08-01 修正: 稀疏网络实测 e1 均值仅 ~-1.5e-4 (非零突触 28-39%,
+//     发放率 ~1.3% → pre/post 时序配对稀少 → delta_w ≈ 0), 增益 0.1 下
+//     evidence 增量 (≈2.4e-3/1000步) < 结构衰减 (×0.95/1000步, ≈3.7e-3/1000步)
+//     → PSW 证据纯衰减 (20K 步 α+β: 0.1→0.036), 永不成熟.
+//     修复: 增益 ×10 (0.1→1.0), 增量 ≈24e-3/1000步 > 衰减, 15K 步 SYNAPTOGENIC
+//     净增 ≈0.3, α+β → ~0.37 可成熟 (阈值 0.2).
 //   DECODE_ELIGIBILITY_GAIN: 预测误差反传到神经元级 eligibility 的增益
 //     decode_error ≈ 1/n_classes = 1/256 ≈ 0.004, 经 W_decode^T 求和后 ≈ 0.5
 //     增益 0.01 让 neuron_eligibility ≈ 0.005, 与 e1 量级匹配
-#define ELIGIBILITY_EVIDENCE_GAIN   0.1f    // 突触级 trace 替代瞬时 delta_w 的增益
+#define ELIGIBILITY_EVIDENCE_GAIN   1.0f    // 突触级 trace 替代瞬时 delta_w 的增益 (2026-08-01: 0.1→1.0)
 #define DECODE_ELIGIBILITY_GAIN     0.01f   // 预测误差反传到神经元级 eligibility 的增益
 // 神经元级 eligibility 衰减时间常数 (ms, 与 e1 一致以保持时序耦合)
 #define NEURON_ELIB_TAU             20.0f

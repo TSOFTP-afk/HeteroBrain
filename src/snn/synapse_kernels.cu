@@ -192,7 +192,8 @@ __global__ void stdp_dual_trace_kernel(
     const float* __restrict__ neuron_eligibility,    // 闭环修复: 神经元级 eligibility (按 post 索引)
     int n_synapses,
     int step,
-    float plasticity_gain)
+    float plasticity_gain,
+    float eta_multiplier)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= n_synapses) return;
@@ -258,6 +259,9 @@ __global__ void stdp_dual_trace_kernel(
     bool is_feedforward = (s.receptor_flags & RECEPTOR_FLAG_FEEDFORWARD);
     float eta_alpha = is_feedforward ? PSW_ETA_ALPHA_FEEDFORWARD : PSW_ETA_ALPHA;
     float eta_beta  = is_feedforward ? PSW_ETA_BETA_FEEDFORWARD  : PSW_ETA_BETA;
+    // 课程模式: 发育阶段倍率 (启蒙 3.0 / 初中 1.5 / 高中 1.0 / 成年 0.3, 非课程 = 1.0)
+    eta_alpha *= eta_multiplier;
+    eta_beta  *= eta_multiplier;
 
     // 闭环修复: 使用 e1 × neuron_eligibility[post] 替代瞬时 delta_w 作为证据信号
     // 三因素学习规则: evidence = η · e1[i] · neuron_eligibility[post] · M_ij · plasticity_factor
@@ -288,6 +292,8 @@ __global__ void stdp_dual_trace_kernel(
         float ca_excess = s.ca_concentration - CA_REBOUND_THRESHOLD;
         float rebound_evidence = eta_beta * ca_excess * CA_REBOUND_LTD_GAIN
                                  * plasticity_gain * M_ij;
+        // 限幅: 单事件回弹 LTD 证据上限, 防止 PSW_ETA_BETA=200 下 beta 巨尾
+        if (rebound_evidence > CA_REBOUND_EVIDENCE_CAP) rebound_evidence = CA_REBOUND_EVIDENCE_CAP;
         synapse_beta[i] += rebound_evidence;
     }
 
@@ -327,7 +333,8 @@ __global__ void stdp_arrival_pre_kernel(
     int arrived_ring_idx,
     int arrived_count,
     int step,
-    float plasticity_gain)
+    float plasticity_gain,
+    float eta_multiplier)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= arrived_count) return;
@@ -494,7 +501,8 @@ void launch_synapse_nmda(MemoryAllocator* alloc, int step, int arrived_ring_idx,
 }
 
 void launch_stdp_dual_trace(MemoryAllocator* alloc, int step, float plasticity_gain,
-                            int arrived_ring_idx, int arrived_count) {
+                            int arrived_ring_idx, int arrived_count,
+                            float eta_multiplier) {
     PersistentBuffers& b = alloc->buffers();
     int blocks = (N_TOTAL_SYNAPSES_2E + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
     stdp_dual_trace_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
@@ -516,7 +524,8 @@ void launch_stdp_dual_trace(MemoryAllocator* alloc, int step, float plasticity_g
         b.d_neuron_eligibility,     // 闭环修复: 神经元级 eligibility
         N_TOTAL_SYNAPSES_2E,
         step,
-        plasticity_gain);
+        plasticity_gain,
+        eta_multiplier);
 
     if (arrived_count > 0) {
         int arrival_blocks = (arrived_count + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
@@ -539,7 +548,8 @@ void launch_stdp_dual_trace(MemoryAllocator* alloc, int step, float plasticity_g
             arrived_ring_idx,
             arrived_count,
             step,
-            plasticity_gain);
+            plasticity_gain,
+            eta_multiplier);
     }
 }
 

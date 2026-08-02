@@ -27,8 +27,12 @@
 #include "thalamic_gate.cuh"
 #include "decode_kernels.cuh"
 #include "bptt_trainer.cuh"
+#include "personality_profiles.h"
+#include "curriculum_loader.h"
+#include "mod_simulator.h"
 #include <climits>
 #include <cmath>
+#include <string>
 #include <vector>
 
 namespace stage2e {
@@ -237,10 +241,28 @@ public:
     void set_bptt_target_token(int32_t token) { bptt_last_target_token_ = token; }
 
     // ==================== Phase 3a-D3: 课程训练接口 ====================
-    // 启用课程模式: 设置目标调质 + 目标工具 + readout 学习率 + 损失权重
-    //   BPTT 反向用 调质误差 + 工具误差 替代解码误差 (backward_curriculum)
+    // 设置课程发育阶段: 填充 STDP eta 倍率 + 调质基线 + PAD 损失权重来源
+    //   (由其他任务实现, 本任务只接线) — 须在 set_curriculum_mode 之前调用,
+    //   main.cpp 在每处 set_curriculum_mode 前先调用 (2026-08-02 Task A)
+    void set_curriculum_stage(CurriculumStage stage);
+
+    // 每 100 步推进浓度模拟器并刷新当前块目标 (main.cpp 课程循环调用)
+    //   sample: 当前课程样本 (events 用于取本块到期事件)
+    //   rel: 窗口内相对步 (应为 100 倍数)
+    //   base_signal: 阶段基线, GENE_MAP 列顺序 [DA,ACh,NE,5HT,GABA,Oxy]
+    void advance_curriculum_target(const CurriculumSample* sample, int rel,
+                                   const float base_signal[6]);
+    // 当前块模拟浓度/PAD 目标 (分段监督: N3F 每步误差与窗口末 readout 更新用,
+    //   与内部注入同步推进的连续浓度; 2026-08-02 Task 8)
+    const float* curriculum_target_mod_curr() const { return curriculum_target_mod_curr_; }
+    const float* curriculum_target_pad_curr() const { return curriculum_target_pad_curr_; }
+    // 启用课程模式: 设置目标调质 + 目标工具 + 目标 PAD + readout 学习率 + 损失权重
+    //   BPTT 反向用 调质/PAD/工具 误差替代解码误差 (backward_curriculum)
     //   target_tool: 0-5 = 6 类工具, 6 = 不调用
+    //   w_pad 不显式传入: 内部从 personality_profile(curriculum_stage_).bptt_loss_weight_pad
+    //   取值 (初中 0.3 / 高中 0.5), 与 set_curriculum_mode 的调用时序解耦
     void set_curriculum_mode(const float target_mod[6], int target_tool,
+                             const float target_pad[3],
                              float readout_lr, float w_mod, float w_tool);
     void disable_curriculum_mode();
     bool curriculum_active() const { return curriculum_mode_; }
@@ -250,6 +272,31 @@ public:
     // 冻结 BPTT 更新 (评估模式): bptt_step 只做前向 + loss 记录, 不反传不更新
     void set_bptt_freeze(bool freeze) { bptt_freeze_ = freeze; }
     bool bptt_freeze() const { return bptt_freeze_; }
+
+    // ==================== N3F: 调质门控三因子在线学习 ====================
+    // 设置课程突触学习算法: "bptt" (窗口重放反传) | "n3f" (三因子在线)
+    //   n3f 模式: 每步课程误差 → 神经元级 eligibility → STDP 证据调制,
+    //   无窗口重放/无历史缓冲, 网络可拥有任意动力学 (自发活动/噪声)
+    void set_learning_rule(const std::string& rule) { learning_rule_ = rule; }
+    bool n3f_mode() const { return learning_rule_ == "n3f"; }
+    // N3F 每步在线学习 (在 scheduler.step() 之后由 main.cpp 调用):
+    //   readout 前向 (当前帧) → 课程误差 → eligibility 教学信号注入
+    //   readout 权重在窗口末由 main.cpp 切换分支更新 (累计帧)
+    //   loss 同步回读仅每窗口 (step % window == 0) 一次, 避免每步阻塞流水线
+    //   allow_elig_inject: 事件门控 — 仅当窗口内课程样本事件已注入
+    //   (evt.step_offset == rel) 后为 true, 才允许 eligibility 注入;
+    //   事件前不注入, 消除教学目标与事件注入时序失配造成的虚假误差 (§7.1)
+    void n3f_online_step(int current_step, bool allow_elig_inject);
+
+    // N3F 具身奖励 → 神经元级 eligibility (第三因子, spec §7.1, 2026-08-01)
+    //   reward ∈ [-1,1]: reward>0 强化, reward<0 削弱 (uniform 广播, 生物对应 DA 系统)
+    //   在 scheduler.step() 之前调用 (沙盒 feedback 后), 本次 STDP 立即生效 (无滞后)
+    void n3f_embodied_step(float reward);
+
+    // 具身感知注入 (2026-08-01 修复):
+    //   main.cpp 在 env 步计算 50 柱感知向量后调用; step() 内部在 delay_inject
+    //   (清零 d_input_current) 之后、lif_adex 之前注入, 确保感知信号不被覆盖
+    void set_embodied_sensory(const float sensory[50]);
 
     // Task D3: 暴露 d_gate_states_ 供 main.cpp 在 BPE 注入时使用
     // (BPE 模式下 main.cpp 在 step() 之前调用 launch_bpe_inject, 需要传入门控状态)
@@ -325,6 +372,10 @@ private:
     float gate_mean_;                          // 最近一次门控均值 (host 缓存)
     float gate_open_ratio_;                    // 最近一次门控开启比例 (host 缓存)
 
+    // 具身感知注入 (2026-08-01 修复): 感知向量由 main.cpp 设置, step() 内注入
+    float h_embodied_sensory_[50] = {};      // host 缓存 50 柱感知向量
+    bool  embodied_sensory_active_ = false;  // 是否有待注入的感知向量
+
     // ==================== Task 4-5: 在线解码状态 ====================
     float last_decode_loss_ = 0.0f;            // 最近一次解码 cross-entropy loss
     int   last_predicted_byte_ = 0;            // 最近一次解码预测字节 (0..255)
@@ -396,11 +447,29 @@ private:
     bool  curriculum_mode_ = false;         // 课程模式激活
     float curriculum_target_mod_[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};  // 目标调质
     int   curriculum_target_tool_ = 6;      // 目标工具 (0-5 = 6 工具, 6 = 不调用)
+    float curriculum_target_pad_[3] = {0.0f, 0.0f, 0.0f};  // 目标 PAD 情感 [Pleasure, Arousal, Dominance] (2026-08-02 Task 5)
     float curriculum_readout_lr_ = 0.001f;  // readout 权重学习率
     float curriculum_w_mod_ = 1.0f;         // 调质损失权重
     float curriculum_w_tool_ = 0.3f;        // 工具损失权重 (初中 0.3)
+    float curriculum_w_pad_ = 0.0f;         // PAD 情感损失权重 (2026-08-02 Task 5,
+                                            //   set_curriculum_mode 内部从阶段 profile 取:
+                                            //   初中 0.3 / 高中 0.5; 启蒙/成年 0 → 无贡献)
     float curriculum_last_loss_ = 0.0f;     // 最近一次课程 BPTT loss
     bool  bptt_freeze_ = false;             // 冻结 BPTT 更新 (评估模式)
+    std::string learning_rule_ = "bptt";    // 课程突触学习算法: bptt | n3f
+
+    // ---- 阶段参数 (仅课程模式生效, 由 set_curriculum_stage 填充) ----
+    CurriculumStage curriculum_stage_ = STAGE_ENLIGHTENMENT;  // 当前课程发育阶段
+    float stdp_eta_multiplier_ = 1.0f;      // STDP eta 阶段倍率 (非课程模式恒为 1.0)
+    float curriculum_baseline_mod_[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+                                            // 阶段调质基线 [DA, 5HT, NE, ACh, GABA, Oxy]
+    bool  curriculum_baseline_active_ = false;  // 阶段基线是否生效 (仅课程模式)
+
+    // ---- 分段监督目标 (2026-08-02 Task 5) ----
+    // 当前 100 步块的模拟浓度/PAD 目标 (N3F 每步误差用, 与内部注入同步推进)
+    float curriculum_target_mod_curr_[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    float curriculum_target_pad_curr_[3] = {0.0f, 0.0f, 0.0f};
+    CurriculumModSimulator curriculum_mod_sim_;   // 浓度模拟器 (每 100 步 advance)
 
     // PCA 增量更新 (每 PCA_UPDATE_INTERVAL 步, CPU 端 Oja's rule)
     void launch_pca_update_cpu(int step);

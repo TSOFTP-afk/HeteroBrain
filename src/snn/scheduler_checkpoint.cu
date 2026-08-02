@@ -264,6 +264,21 @@ std::vector<Section> SchedulerCheckpointAccess::make_sections(
         (uint64_t)N_TOTAL_NEURONS_2E * 6, sizeof(float));
     add(&s, "curriculum_tool_readout", b.d_curriculum_tool_weights,
         (uint64_t)N_TOTAL_NEURONS_2E * CURRICULUM_N_TOOL, sizeof(float));
+    // 具身策略权重 (Phase 3a-D1, 2026-08-01), 放末尾, 旧 checkpoint 缺失时优雅降级 (随机初始化)
+    add(&s, "l5_to_motor_synapses", b.d_l5_to_motor_synapses,
+        (uint64_t)N_MOTOR_NEURONS * L5_TO_MOTOR_SYNAPSES_PER_NEURON, sizeof(BioSynapse));
+    add(&s, "l5_to_motor_csr", b.d_l5_to_motor_csr_row_ptr,
+        (uint64_t)N_MOTOR_NEURONS + 1, sizeof(int));
+    add(&s, "motor_neurons", b.d_motor_neurons,
+        (uint64_t)N_MOTOR_NEURONS, sizeof(NeuronStateAdEx));
+    // 课程窗口累计 spike 缓冲 (窗口内平均发放率特征, resume 时延续部分窗口状态)
+    add(&s, "curriculum_accum_spikes", b.d_curriculum_accum_spikes,
+        (uint64_t)N_TOTAL_NEURONS_2E, sizeof(float));
+    // PAD 情感 readout 权重 (Phase 3a-D3, N×3, 2026-08-02 Task 5)
+    // 放在 section 表最末尾, 旧版 checkpoint 未含此节时 load 端优雅降级 (随机初始化,
+    // 只重初始化 PAD 头, 不触碰已加载的 mod/tool readout 权重)
+    add(&s, "curriculum_pad_readout", b.d_curriculum_pad_weights,
+        (uint64_t)N_TOTAL_NEURONS_2E * 3, sizeof(float));
     return s;
 }
 
@@ -396,7 +411,9 @@ bool SchedulerCheckpointAccess::restore_state(BioMechanismScheduler* self,
     self->bptt_window_size = x.bptt_window_size;
 
     // 若 checkpoint 中 BPTT 启用, 重建 BPTTTrainer
-    if (self->bptt_enabled) {
+    // N3F 课程模式 (learning_rule_=="n3f"): 不重建 BPTT trainer —
+    //   三因子在线学习无窗口重放/无历史缓冲, BPTT 反传会与教学信号混合干扰
+    if (self->bptt_enabled && !self->n3f_mode()) {
         BPTTConfig cfg;
         cfg.window_size = x.bptt_window_size;
         cfg.lr = x.bptt_lr;
@@ -567,12 +584,14 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
     SchedulerState state{};
     auto sections = SchedulerCheckpointAccess::make_sections(this, &state);
     // 兼容: 磁盘 section 可以是新 sections 的严格前缀
-    //   (缺失末尾 1-2 个 section: 旧版无课程 readout / 更旧无 decode_weights)
+    //   (缺失末尾 1-2 个 section: 旧版无课程 readout / 更旧无 decode_weights;
+    //    新增 4 个具身尾部节 (l5_to_motor_synapses/csr/motor_neurons/curriculum_accum_spikes)
+    //    后旧 checkpoint 最多缺 4 节, 放宽上限到 6 仍可优雅降级)
     int missing_tail = 0;
     if (!ok || !section_layout_matches(sections, disk)) {
         const bool prefix_layout_ok =
             disk.size() <= sections.size() &&
-            sections.size() - disk.size() <= 2;
+            sections.size() - disk.size() <= 6;
         bool prefix_ok = prefix_layout_ok;
         for (size_t i = 0; prefix_ok && i < disk.size(); ++i) {
             if (std::strncmp(sections[i].name, disk[i].name, sizeof(disk[i].name)) != 0 ||
@@ -677,6 +696,12 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
         } else if (name == "curriculum_readout" || name == "curriculum_tool_readout") {
             launch_curriculum_readout_init(pb, 0.01f, 42u);
             std::printf("[Checkpoint] 警告: curriculum readout 未找到, 用随机小值初始化\n");
+        } else if (name == "curriculum_pad_readout") {
+            // 只重初始化 PAD 头 (2026-08-02 Task 5):
+            //   旧 checkpoint 通常含 mod/tool 节但缺 PAD 节; 全量 launch_curriculum_readout_init
+            //   会重随机化已加载的 mod/tool 权重 → 必须用 PAD-only init
+            launch_curriculum_pad_readout_init(pb, 0.01f, 42u);
+            std::printf("[Checkpoint] 警告: curriculum_pad_readout 未找到, 用随机小值初始化 (仅 PAD 头)\n");
         }
     }
     std::fclose(fp);

@@ -129,12 +129,42 @@ void launch_structural_rebuild(
 //   返回 false = 跳过重建 (变更 <= 5% 阈值)
 //   临时缓冲 (d_new_row_ptr + d_remap_table ≈ 43MB) 内部分配, 重建后立即释放
 //   d_new_row_ptr / d_remap_table 参数保留以匹配 kernel 签名, wrapper 内部自行分配
+//
+//   aligned / n_alloc: 重建后同步重排按突触索引对齐的数组 (修复 GPU hang)
+//   csr_rebuild_kernel 只重排 d_synapses + d_row_ptr, 若不同步重排
+//   d_csr_col_idx / d_weights_cache / eligibility 等 10.7M 对齐数组,
+//   STDP/NMDA kernel 读取的 col_idx 与 d_synapses 错位 → 越界访问 → GPU hang.
+//   重建后在内部调用 launch_remap_aligned_arrays 同步所有对齐数组,
+//   并将尾部 [新总数, n_alloc) 清零 (防止残留垃圾 post 索引越界).
+struct AlignedSynapseArrays {
+    BioSynapse* synapses;            // d_synapses (重建已完成, 供新突触镜像权重/延迟)
+    int*   col_idx;                  // d_csr_col_idx: STDP/NMDA kernel 的 post 索引
+    float* weights_cache;
+    int*   trace_epoch;              // d_stdp_trace_epoch
+    float* x_pre_trace;              // d_stdp_x_pre_trace
+    float* eligibility;
+    float* eligibility_slow;
+    float* synapse_alpha;
+    float* synapse_beta;
+    float* ca_snapshot;
+    uint8_t* oxytocin_receptor;
+    uint8_t* synapse_delay;
+    float* camkii_activity;
+};
+
+// 重建后重排对齐数组 (存活搬运 + 新突触初始化 + 尾部清零)
+void launch_remap_aligned_arrays(const AlignedSynapseArrays& a,
+                                 const int* d_remap_table, const int* d_new_pairs,
+                                 int n_old, int new_count, int n_new_total,
+                                 int n_alloc, cudaStream_t stream);
+
 bool launch_csr_rebuild(
     BioSynapse* d_synapses, int* d_row_ptr,
     const int* d_new_pairs, int new_count,
     const int* d_prune_marks, int n_neurons,
     int n_synapses_total,
     int* d_new_row_ptr, int* d_remap_table,
+    const AlignedSynapseArrays& aligned, int n_alloc,
     cudaStream_t stream);
 
 // =============================================================================
@@ -187,6 +217,7 @@ int launch_csr_rebuild_with_integrity_check(
     const int* d_new_pairs, int new_count,
     const int* d_prune_marks, int n_neurons,
     int n_synapses_total,
+    const AlignedSynapseArrays& aligned, int n_alloc,
     cudaStream_t stream);
 
 } // namespace stage2e

@@ -155,6 +155,19 @@ struct PersistentBuffers {
     float*             d_curriculum_tool_weights = nullptr;     // [N × 7]
     float*             d_curriculum_tool_logits = nullptr;      // [7]
     float*             d_curriculum_tool_error = nullptr;       // [7]
+    // PAD 情感 readout (2026-08-02 Task 5): [N × 3] ≈ 60K×3×4B = 0.7 MB
+    //   spike → 3 维 PAD 情感预测 [Pleasure, Arousal, Dominance], 监督 = 目标 PAD (MSE)
+    //   与 mod/tool readout 完全并行 (各自权重/误差/前向), 损失权重取 profile.bptt_loss_weight_pad
+    float*             d_curriculum_pad_weights = nullptr;      // [N × 3]
+    float*             d_curriculum_pad_logits = nullptr;       // [3]
+    float*             d_curriculum_pad_error = nullptr;        // [3]
+    // 课程窗口累计 spike 平均发放率 [N] (事件调质在窗口内逐帧调制发放,
+    // 累计率比最后一帧更能编码事件类型 → 工具 readout 的输入特征)
+    float*             d_curriculum_accum_spikes = nullptr;     // [N] 窗口累计/窗口长
+    // 2026-08-01 spec §7.9 修复: 消除 launch_curriculum_error 的静态懒分配
+    //   (多流/多 GPU 场景不可重入, 且与 PersistentBuffers 生命周期管理分离)
+    float*             d_curriculum_target = nullptr;          // [9] 目标缓冲: [0..6) 调质 + [6..9) PAD (H2D 拷贝缓冲)
+    float*             d_curriculum_loss = nullptr;            // [1] loss 归约缓冲
 
     // L5 → 运动皮层稀疏 CSR 突触 (250K 突触, 每运动神经元 50 个 L5 突触)
     // 突触结构 80B + 权重 4B + CSR col_idx 4B

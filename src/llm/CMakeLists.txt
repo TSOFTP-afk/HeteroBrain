@@ -7,27 +7,28 @@
 #   prompt_builder   - 上下文构造 (用户输入 + SNN 检索 + RAG 知识)
 # =============================================================================
 
+# Phase 1 实现后恢复源文件列表 (当前 LLM_SRCS 为空, 走下方 else() 空库分支):
 set(LLM_SRCS
-    llama_runner.cpp
-    tokenizer_bridge.cpp
-    prompt_builder.cpp
+    # llama_runner.cpp
+    # tokenizer_bridge.cpp
+    # prompt_builder.cpp
 )
 
 set(LLM_HEADERS
-    llama_runner.h
-    tokenizer_bridge.h
-    prompt_builder.h
+    # llama_runner.h
+    # tokenizer_bridge.h
+    # prompt_builder.h
 )
 
-# Phase 1 占位: 暂无源文件, 用空 target 保持 CMake 结构
+# Phase 1 占位: 暂无源文件, 用 INTERFACE 空库保持 CMake 结构
 if(LLM_SRCS)
     add_library(llm_subsystem STATIC ${LLM_SRCS} ${LLM_HEADERS})
 else()
-    add_library(llm_subsystem STATIC INTERFACE)
+    add_library(llm_subsystem INTERFACE)
 endif()
 
 target_include_directories(llm_subsystem
-    PUBLIC
+    INTERFACE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/third_party
 )
