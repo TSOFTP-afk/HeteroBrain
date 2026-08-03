@@ -26,6 +26,19 @@ namespace stage2e {
 // 工具类数: 0-5 = 6 类工具索引, 6 = 不调用 (纯内部推理)
 static const int CURRICULUM_N_TOOL = 7;
 
+// =============================================================================
+// 调质通道顺序契约 (2026-08-03 固化, 防止跨链路语义错位):
+//   readout 调质头 / 课程模拟器 conc / target_mod 统一使用 GENE_MAP 列顺序:
+//     [DA, ACh, NE, 5HT, GABA, Oxy]  (索引 0-5)
+//   通道索引常量定义见 mod_simulator.h: MOD_CH_DA / MOD_CH_ACH / MOD_CH_NE /
+//     MOD_CH_5HT / MOD_CH_GABA / MOD_CH_OXY (GENE_MAP 顺序).
+//   ⚠️ personality_profiles.h 的 baseline_mod 是不同顺序:
+//     [DA, 5HT, NE, ACh, GABA, Oxy] — 跨接口 (main.cpp base_conc /
+//     test_event_scheduler.cpp base_signal) 使用前必须按 {0, 3, 2, 1, 4, 5} 重排!
+//   modulatory_kernels.cu 按 personality 顺序直接解包 stage_baseline (与定义一致).
+//   取 readout/模拟器通道时一律用 MOD_CH_* 常量, 勿用裸索引.
+// =============================================================================
+
 // 2026-08-01 spec §7.8 修复: readout 权重裁剪阈值
 //   若某些神经元 spike_rates[i] 系统性偏高, 无裁剪的 SGD 更新会发散
 //   clip 到 [-10, 10] 防长时间训练数值不稳定 (logits 量级 ~ 60K×0.01 ≈ 600)

@@ -9,6 +9,9 @@
 //
 //   三个 readout 头 (与解码器同构):
 //     调质头: pred_mod[m] = Σ_i W_mod[i*6+m] · spike[i]   (m ∈ [0,6))
+//             ⚠️ m 为 GENE_MAP 顺序 [DA, ACh, NE, 5HT, GABA, Oxy]
+//             (通道契约见 bptt_curriculum.cuh, 索引常量 MOD_CH_* 见 mod_simulator.h;
+//              勿按 personality 顺序误读)
 //     工具头: pred_tool[t] = Σ_i W_tool[i*7+t] · spike[i]  (t ∈ [0,7))
 //             t ∈ [0,6) = 6 类工具, t = 6 = 不调用
 //     PAD 头:  pred_pad[p] = Σ_i W_pad[i*3+p] · spike[i]   (p ∈ [0,3))

@@ -42,8 +42,12 @@ struct PersonalityProfile {
     float bptt_loss_weight_pad;       // PAD 情感损失权重   (初中 0.3 / 高中 0.5)
     float bptt_loss_weight_tool;      // 工具调用损失权重   (初中 0.0 / 高中 0.5)
 
-    // === 调质基线 (6 维: [DA, 5HT, NE, ACh, GABA, Oxy]) ===
-    float baseline_mod[6];            // [DA, 5HT, NE, ACh, GABA, Oxy]
+    // === 调质基线 (6 维) ===
+    // ⚠️ 顺序 = personality 顺序 [DA, 5HT, NE, ACh, GABA, Oxy] (索引 0-5),
+    //    与 readout/课程模拟器 的 GENE_MAP 顺序 [DA, ACh, NE, 5HT, GABA, Oxy] 不同!
+    //    跨接口消费前必须重排 (main.cpp base_conc / test_event_scheduler.cpp base_signal,
+    //    映射 {0, 3, 2, 1, 4, 5}); modulatory_kernels.cu 按 personality 顺序直接解包.
+    float baseline_mod[6];            // [DA, 5HT, NE, ACh, GABA, Oxy] (personality 顺序)
 };
 
 // 三阶段参数表 (spec §7 对照表)
