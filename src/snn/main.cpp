@@ -994,9 +994,13 @@ int main(int argc, char** argv) {
             mse_ref /= 6.0;
 
             printf("[CurriculumEval] sample=%d n_events=%zu target_tool=%d pred_tool=%d %s | "
+                   "pred_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] "
+                   "gtr_mod=[%.3f %.3f %.3f %.3f %.3f %.3f] | "
                    "mod MSE=%.4f MAE=%.4f (jsonl_ref=%.4f) | pad MSE=%.4f MAE=%.4f\n",
                    smp->sample_id, smp->events.size(),
                    smp->target_tool_call, pred_tool, tool_ok ? "OK " : "FAIL",
+                   h_mod[0], h_mod[1], h_mod[2], h_mod[3], h_mod[4], h_mod[5],
+                   gtr_mod[0], gtr_mod[1], gtr_mod[2], gtr_mod[3], gtr_mod[4], gtr_mod[5],
                    mse, mae, mse_ref, pad_mse, pad_mae);
         }
 
