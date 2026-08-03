@@ -201,3 +201,86 @@ snn_stage2e_p1.exe `
 - [ ] 调质 MSE 判据：**140K 平台确认（0.0420，20K 仅降 1.2%）**——同配置（课程+具身、w_tool=0、lr=0.01）已收敛，距 0.0339 还差 19.3%，继续同配置训练边际收益≈0。可选：提 curriculum_lr 冲击 / 纯课程 A/B / 接受 0.042 进高中
 - [ ] 高中阶段（stage=2）衔接：baseline 5HT 上调、w_pad 上调、eta=1.0，课程数据 `data/events/curriculum_high_school.jsonl`
 - [ ] 远期：沙盒 v2/v3 社会对象 + 主动询问涌现（见 enlightenment-design-spec.md §6.4）
+
+---
+
+## 10. 当前状态快照（新会话交接，2026-08-03 140K）
+
+> 供新窗口快速恢复上下文。详细数据见 §9.1-§9.6 与各日志文件。
+
+### 10.1 一句话现状
+
+初中课程（Stage 1a）训练至 **140K 步**，PSW/复合事件/PAD 判据达标，**调质 MSE 0.0420 进入平台期（唯一未达判据）**，等待决策：提 lr 冲击 / 纯课程 A/B / 接受进高中。
+
+### 10.2 资产与数据
+
+| 项 | 值 |
+|---|---|
+| 当前 checkpoint | `checkpoints/middle_1a/ckpt_step140000.snn2e`（保留 90K-140K，keep=4） |
+| 可执行文件 | `build/snn/bin/snn_train.exe`（build_time 23:02:29，含 eval pred_mod 打印） |
+| 最新 eval | `build/snn/middle_1a_eval_140k.log`（120 样本，调质 MSE=0.0420） |
+| 训练日志 | `build/snn/middle_1a_140k.log` / `_120k.log` / `_100k.log` / `_80k.log` |
+| 课程数据 | `data/events/curriculum_middle_school.jsonl`（2000 样本，12 链） |
+| 复合事件验证 | `build/snn/eval_composite_linearity.log`（4 变体对照，非线性达标） |
+| git | main 分支，领先 origin 20+ 提交，工作区 clean（末次 commit 2d95e5c） |
+
+### 10.3 最新指标（120 样本 eval 口径）
+
+| 指标 | 140K 值 | 趋势 |
+|---|---|---|
+| 调质 MSE / MAE | 0.0420 / 0.1610 | 平台期（120K=0.0425） |
+| PAD MSE / MAE | 0.0635 / 0.2338 | 稳定 |
+| PSW α / β / evidence | 0.159 / 0.212 / 0.371 | 持续健康增长（criterion_psw=1） |
+| PSW mature | 15.7% | 正常 |
+| 工具准确率 | 13.3%（冻结） | w_tool=0 生效确认 |
+| decode perplexity / acc | 2.4 / 65-72% | 背景无退化 |
+| 突触总数 | 8,729,034（净修剪 18.4%） | 稳态修剪，每 1000 步 prune 5-10 万 |
+
+### 10.4 判据完成度（3.5/4）
+
+- ✅ 复合事件非线性（偏差范数 0.42，复合响应=线性叠加的 53%）
+- ✅ PSW β 不单侧失控（β=0.212 < 0.4）
+- ✅ 工具判据已废弃（职责归 LLM 语义理解，w_tool=0，commit aa71f53）
+- ⚠️ 调质 MSE -50% 判据未达（0.0420 vs 目标 0.0339，差 19.3%）
+
+### 10.5 待决策（上次对话遗留，未定）
+
+1. **提 curriculum_lr 0.01→0.03** 续跑 20K 冲击 MSE（最便宜，~45 min）
+2. **纯课程 A/B**（去掉 `--embodied`）排除具身干扰
+3. **接受 0.042 进高中**（stage=2）：MSE 判据改为"PSW 健康 + PAD 稳定"为准
+
+### 10.6 新窗口必备的环境/构建知识（踩坑记录）
+
+- **cmake 不在 PATH**：用 `C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe`
+- **构建前必须设置 MSVC 环境**（PowerShell，`cmd /c` 被安全策略禁止，不能直接 vcvars64）：
+  ```powershell
+  $msvc = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207"
+  $kit = "10.0.28000.0"
+  $env:Path = "$msvc\bin\Hostx64\x64;${env:ProgramFiles(x86)}\Windows Kits\10\bin\$kit\x64;${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;$env:Path"
+  $env:INCLUDE = "$msvc\include;${env:ProgramFiles(x86)}\Windows Kits\10\Include\$kit\ucrt;${env:ProgramFiles(x86)}\Windows Kits\10\Include\$kit\um;${env:ProgramFiles(x86)}\Windows Kits\10\Include\$kit\shared"
+  $env:LIB = "$msvc\lib\x64;${env:ProgramFiles(x86)}\Windows Kits\10\Lib\$kit\ucrt\x64;${env:ProgramFiles(x86)}\Windows Kits\10\Lib\$kit\um\x64"
+  ```
+- **构建命令**：`& cmake --build build/snn --target snn_train`（目标在 **build/snn** 子目录，非顶层）
+- **运行命令模板**（续跑训练）：
+  ```powershell
+  & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 160000 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --learning-rule n3f --bptt-window-size 400 --curriculum-lr 0.0100 --checkpoint-dir checkpoints/middle_1a --checkpoint-interval 10000 --keep-checkpoints 4 --csv build/snn/middle_1a_160k.csv --seed 42 --embodied --embodied-scene hunger_feeding --input-mode byte --text data/smoke_test.txt
+  ```
+- **eval 命令模板**（120 样本，`--steps` 必须 > resume 步数）：
+  ```powershell
+  & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 141000 --curriculum-eval --curriculum-eval-samples 120 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --checkpoint-dir checkpoints/middle_1a_eval --checkpoint-interval 0 --input-mode byte --text data/smoke_test.txt --seed 42
+  ```
+- 训练约 140 ms/步 → 20K ≈ 47 min；120 样本 eval ≈ 13 min
+
+### 10.7 代码契约与约定（防再踩坑）
+
+- **调质通道顺序**：readout/模拟器 = GENE_MAP `[DA, ACh, NE, 5HT, GABA, Oxy]`；`personality_profiles.h` 的 `baseline_mod` = personality 顺序 `[DA, 5HT, NE, ACh, GABA, Oxy]`，跨接口按 `{0,3,2,1,4,5}` 重排（main.cpp/test 已做）。常量 `MOD_CH_*` 在 `mod_simulator.h`，契约注释在 `bptt_curriculum.cuh`（commit a5d82ff）
+- **eval 样本数**：用 120（40 样本口径噪声大，曾把 exam_success 误判为 0.24 垫底，实为噪声）
+- **w_tool=0**：工具 readout 冻结，工具决策归 LLM（§9.2 决策），不要恢复工具训练
+- **eval 日志正则**：OK 行是双空格 `OK  |`，解析时注意
+- **MSE 波动性**：60K→100K 曾回升（0.046→0.072），120K 突降 0.0425——历史教训是"先扩样本确认再改代码"
+
+### 10.8 远期方向（不因新窗口丢失）
+
+- 沙盒 v2/v3 社会对象 + 主动询问涌现（`enlightenment-design-spec.md` §6.4：SNN 涌现询问动机，LLM 生成问题内容）
+- 高中阶段（stage=2）：baseline 5HT 上调、w_pad 上调、eta=1.0，`data/events/curriculum_high_school.jsonl`
+- 课程数据生成：`src/snn/tools/generate_curriculum_data.py --stage high_school`
