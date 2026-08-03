@@ -17,7 +17,7 @@
 //   课程损失 (spec §5.3 扩展, 初中起训工具 + PAD):
 //     L = w_mod · MSE(pred_mod, target_mod)
 //       + w_pad · MSE(pred_pad, target_pad)
-//       + w_tool · CE(pred_tool, target_tool)     (softmax over 7)
+//       + w_tool · CE(pred_tool, target_tool)     (softmax over 7, 2026-08-03 起类别加权)
 //
 //   反传 (三路误差合并注入 BPTT 最终步梯度 / N3F eligibility):
 //     dL/dS_direct[i] = Σ_m w_mod·W_mod[i,m]·err_mod[m]
@@ -266,6 +266,16 @@ __global__ void curriculum_error_kernel(
     }
     // 工具部分: thread 0 单独算 (softmax 需全 7 个 logits)
     if (threadIdx.x == 0) {
+        // 2026-08-03 工具类分化: 类别加权 CE (inverse-frequency, 归一化使平均权重=1)
+        //   依据 curriculum_middle_school.jsonl 2000 样本工具分布统计:
+        //   类 0-4 各 ~190-210 样本, 类 5 无样本, 类 6(不调用) 1018 样本 (50.9%).
+        //   原均匀 CE 下多数类(6)梯度主导 → readout 全预测 6 (55% 准确率假象).
+        //   加权后少数类梯度放大 ~5x, 迫使 readout 分化工具决策.
+        //   L = -w_y·log(p_y);  dL/dz_t = w_y·(p_t - y_t)  (softmax 加权梯度)
+        const float cls_w[CURRICULUM_N_TOOL] = {
+            1.128f, 1.187f, 1.063f, 1.151f, 1.193f, 1.058f, 0.220f
+        };
+        const float w_y = cls_w[target_tool];
         float maxv = -1e30f;
         for (int t = 0; t < CURRICULUM_N_TOOL; ++t) {
             maxv = fmaxf(maxv, tool_logits[t]);
@@ -277,10 +287,10 @@ __global__ void curriculum_error_kernel(
         float ce = 0.0f;
         for (int t = 0; t < CURRICULUM_N_TOOL; ++t) {
             float p = expf(tool_logits[t] - maxv) / denom;
-            // dL_tool/dz_t = p_t - y_t (softmax 梯度)
-            tool_error[t] = p - ((t == target_tool) ? 1.0f : 0.0f);
+            // 加权 softmax 梯度: dL_tool/dz_t = w_y·(p_t - y_t)
+            tool_error[t] = w_y * (p - ((t == target_tool) ? 1.0f : 0.0f));
             if (t == target_tool) {
-                ce = -logf(fmaxf(p, 1e-30f));
+                ce = -w_y * logf(fmaxf(p, 1e-30f));
             }
         }
         sum += w_tool * ce;
