@@ -150,7 +150,7 @@ void test_prompt() {
     CHECK(mood.find("困倦") != std::string::npos, "prompt: 低唤醒 → 困倦");
 
     std::string snippet = build_system_prompt_snippet(s);
-    CHECK(snippet.find("当前心境") != std::string::npos, "prompt: snippet 含心境标题");
+    CHECK(snippet.find("你的情绪基调") != std::string::npos, "prompt: snippet 含心境标题");
     CHECK(snippet.find("共情倾向") != std::string::npos, "prompt: snippet 含共情倾向");
 }
 

@@ -34,7 +34,7 @@ void test_body_init_default() {
     ASSERT_NEAR(b.temperature, 0.5f, 1e-5f, "default temp=0.5");
     ASSERT_NEAR(b.comfort, 0.7f, 1e-5f, "default comfort=0.7");
     ASSERT_NEAR(b.fatigue, 0.0f, 1e-5f, "default fatigue=0");
-    ASSERT_NEAR(b.arousal_value(), 0.51f, 1e-5f, "default arousal (formula) = 0.51");
+    ASSERT_NEAR(b.arousal_value(), 0.61f, 1e-5f, "default arousal = 0.61 (含经期压力 0.10)");
 }
 
 // 测试 2: BodyState 场景初始化
@@ -46,8 +46,8 @@ void test_body_init_scene() {
     b.init_scene("warmth_safety");
     ASSERT_NEAR(b.temperature, 0.2f, 1e-5f, "warmth_safety temp=0.2");
 
-    b.init_scene("discomfort_change");
-    ASSERT_NEAR(b.diaper_dirty, 0.9f, 1e-5f, "discomfort_change diaper=0.9");
+    b.init_scene("menstrual_cycle");
+    ASSERT_NEAR(b.pain, 0.2f, 1e-5f, "menstrual_cycle pain=0.2");
 }
 
 // 测试 3: BodyState 演化 — 饥饿自发累积 (无喂食, 纯压力源)
@@ -106,24 +106,25 @@ void test_motor_readout_host() {
     TEST(m.approach_strength > 0.5f, "approach groups spike -> approach high");
 }
 
-// 测试 7: 沙盒 v1 — cry 求助有效性 (无 agent, 概率映射)
+// 测试 7: 沙盒 v1 — cry 求助有效性 (无 agent, 概率映射, 成人语义: 呼救=止痛)
 void test_env_help_prob() {
     EmbodiedEnvironment env;
     env.init("hunger_feeding");
-    // hunger=0.8 → P 高
+    // pain 高 → P(呼救有效) 高
+    env.body.pain = 0.8f;
     float p = env.compute_help_prob();
-    TEST(p > 0.6f, "high hunger -> high help prob");
+    TEST(p > 0.6f, "high pain -> high help prob");
 
-    env.body.hunger = 0.1f;
+    env.body.pain = 0.0f;
     p = env.compute_help_prob();
-    TEST(p < 0.4f, "low hunger -> lower help prob");
+    TEST(p < 0.4f, "low pain -> lower help prob");
 }
 
 // 测试 8: 沙盒 v1 — 教师信号 (基因硬编码, spec §3.1)
 void test_env_teacher_signal() {
     EmbodiedEnvironment env;
     env.init("hunger_feeding");
-    TEST(env.get_teacher_signal() == ACT_CRY, "hunger>0.6 -> CRY");
+    TEST(env.get_teacher_signal() == ACT_APPROACH, "hunger>0.6 -> APPROACH (foraging)");
 
     env.body.hunger = 0.2f;
     env.body.temperature = 0.2f;  // 偏离 0.5
@@ -178,12 +179,12 @@ void test_env_step_closed_loop() {
     env.init("hunger_feeding");
 
     MotorReadout motor = {};
-    motor.cry_intensity = 0.9f;      // 大声求助
-    motor.approach_strength = 0.0f;
+    motor.approach_strength = 0.9f;      // 觅食 (成人语义: hunger↓ 靠 approach)
+    motor.cry_intensity = 0.0f;
     motor.avoid_strength = 0.0f;
     motor.interact_intensity = 0.0f;
 
-    // 跑 200 环境步, 验证不崩 + hunger 最终下降 (求助有效)
+    // 跑 200 环境步, 验证不崩 + hunger 最终下降 (觅食有效)
     bool hunger_dropped = false;
     for (int i = 0; i < 200; ++i) {
         BodyState prev = env.body;
@@ -193,8 +194,8 @@ void test_env_step_closed_loop() {
         TEST(env.body.hunger >= 0.0f && env.body.hunger <= 1.0f, "hunger in range");
         TEST(env.body.comfort >= 0.0f && env.body.comfort <= 1.0f, "comfort in range");
     }
-    // 高饥饿 + 强 cry → 求助大概率有效, 200 步内应降到 <0.5
-    TEST(hunger_dropped, "hunger drops with strong cry (help mapping works)");
+    // 高饥饿 + 强 approach → 觅食大概率有效, 200 步内应降到 <0.5
+    TEST(hunger_dropped, "hunger drops with strong approach (foraging works)");
 }
 
 int main() {
