@@ -1,4 +1,4 @@
-# HeteroBrain 路线图
+# vita 路线图
 
 > 从 SNN 研究项目转型为异构中文对话 AI 引擎的工程化路线。
 
@@ -6,10 +6,10 @@
 
 ### Phase 0 — 工程骨架 ✅
 
-- [x] 创建 HeteroBrain GitHub 仓库
+- [x] 创建 vita GitHub 仓库
 - [x] 旧 SNN 代码迁移到 `legacy/`（126 文件, 1.19MB）
 - [x] 顶层 `CMakeLists.txt` / `.gitignore` / `LICENSE` (Apache 2.0)
-- [x] 工程化目录骨架 `src/{snn,llm,bridge,heterobrain}/`
+- [x] 工程化目录骨架 `src/{snn,llm,bridge,vita}/`
 - [x] 配置文件 `configs/default.yaml`
 - [x] 全新 README，告别 SNN/STDP 研究阶段
 
@@ -37,7 +37,7 @@
 - [ ] 实现 `src/llm/llama_runner.cpp/.h`：用 llama.cpp C API 嵌入式调用（替代 shell 调用 llama-cli）
 - [ ] 实现 `src/llm/tokenizer_bridge.cpp/.h`：BPE 编码/解码
 - [ ] 实现 `src/llm/prompt_builder.cpp/.h`：system + history + user 拼接
-- [ ] 实现 `src/heterobrain/main.cpp`：CLI 入口 + 交互循环
+- [ ] 实现 `src/vita/main.cpp`：CLI 入口 + 交互循环
 
 ## 待启动
 
@@ -81,7 +81,7 @@
 ### Phase 4 — 评测与优化
 
 - [ ] 中文对话评测（CEval / CMMLU 子集 + 人工评测）
-- [ ] 困惑度对比（纯 LLM vs HeteroBrain）
+- [ ] 困惑度对比（纯 LLM vs vita）
 - [ ] 延迟 / 内存 / 功耗 profile
 - [ ] INT4 量化 + 边缘部署验证（手机 / Jetson / 浏览器）
 - [ ] **里程碑**：边缘设备可运行

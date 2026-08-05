@@ -161,7 +161,7 @@ set_target_properties(snn_train PROPERTIES
 # 静态库方案已弃用 (2026-08-05): CMake 3.31 对 MSVC 静态库强制生成文件形式
 # 编译 PDB (-Xcompiler=-Fd<dir>\<lib>.pdb,-FS), 触发 nvcc "single input file
 # required" 错误 (可执行目标用目录形式 -Fd<dir>\,-FS 无此问题)。
-# heterobrain 引擎改为直接编译 src/snn 核心源 (见 src/heterobrain/CMakeLists.txt),
+# vita 引擎改为直接编译 src/snn 核心源 (见 src/vita/CMakeLists.txt),
 # 复用可执行目标的 PDB 行为; 训练入口 snn_train 不受影响。
 #
 # 若未来需要独立静态库, 参考: 禁用 COMPILE_PDB 或规避 -Fd 文件形式。

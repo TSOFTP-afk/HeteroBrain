@@ -8,15 +8,15 @@
 //   3. 未来可替换/并存其它后端 (HTTP/子进程), 桥接层代码零改动。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_LLM_BACKEND_H
-#define HETERO_BRAIN_BRIDGE_LLM_BACKEND_H
+#ifndef VITA_BRIDGE_LLM_BACKEND_H
+#define VITA_BRIDGE_LLM_BACKEND_H
 
 #include <string>
 #include <utility>
 #include <vector>
 #include "emotion_types.h"
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 class LlmBackend {
@@ -48,6 +48,6 @@ public:
 };
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_LLM_BACKEND_H
+#endif  // VITA_BRIDGE_LLM_BACKEND_H

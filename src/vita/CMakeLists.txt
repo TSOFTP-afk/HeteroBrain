@@ -1,5 +1,5 @@
 # =============================================================================
-# HeteroBrain 顶层引擎 — 异构主循环 (SNN 情感核心 + EmotionBridge + LLM 进程内接线)
+# vita 顶层引擎 — 异构主循环 (SNN 情感核心 + EmotionBridge + LLM 进程内接线)
 # =============================================================================
 # 模块:
 #   engine  - EmotionEngine: 对话主循环 (事件注入 → 训练推进 → 情感调制 → LLM 生成)
@@ -35,9 +35,9 @@ list(REMOVE_ITEM SNN_CORE_SRCS
     ${CMAKE_SOURCE_DIR}/src/snn/test_embodied.cpp
     ${CMAKE_SOURCE_DIR}/src/snn/test_event_scheduler.cpp)
 
-add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS} ${SNN_CORE_SRCS})
+add_executable(vita_engine ${ENGINE_SRCS} ${ENGINE_HEADERS} ${SNN_CORE_SRCS})
 
-target_link_libraries(heterobrain_engine
+target_link_libraries(vita_engine
     PRIVATE
         llm_subsystem
         bridge_subsystem
@@ -45,7 +45,7 @@ target_link_libraries(heterobrain_engine
         ws2_32
 )
 
-target_include_directories(heterobrain_engine
+target_include_directories(vita_engine
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src/snn
@@ -59,12 +59,12 @@ set_source_files_properties(
 )
 
 # CUDA 编译属性 (与 snn_train 一致): sm_86 + 可分离编译 + -O3
-target_compile_options(heterobrain_engine PRIVATE
+target_compile_options(vita_engine PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-O3>
     $<$<COMPILE_LANGUAGE:CUDA>:--ptxas-options=-v>
 )
 
-set_target_properties(heterobrain_engine PROPERTIES
+set_target_properties(vita_engine PROPERTIES
     CUDA_ARCHITECTURES "86"
     CUDA_SEPARABLE_COMPILATION ON
 )
@@ -73,7 +73,7 @@ set_target_properties(heterobrain_engine PROPERTIES
 # 引擎链接 snn_subsystem (CUDA::cudart 传播) + llama_prebuilt (CUDA libs 传播)
 
 if(MSVC)
-    target_compile_options(heterobrain_engine PRIVATE
+    target_compile_options(vita_engine PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
         $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>
         $<$<COMPILE_LANGUAGE:CXX>:/wd4244>
@@ -82,16 +82,16 @@ if(MSVC)
         $<$<COMPILE_LANGUAGE:CXX>:/bigobj>
     )
 else()
-    target_compile_options(heterobrain_engine PRIVATE
+    target_compile_options(vita_engine PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wno-unused-parameter>
     )
 endif()
 
-set_target_properties(heterobrain_engine PROPERTIES
+set_target_properties(vita_engine PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
 )
 
 # 安装
-install(TARGETS heterobrain_engine
+install(TARGETS vita_engine
     RUNTIME DESTINATION bin
 )

@@ -7,10 +7,10 @@
 // 通道顺序与 SNN 一致: [DA, ACh, NE, 5HT, GABA, Oxy] (GENE_MAP 顺序, 见 mod_simulator.h)。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_SNN_FEEDBACK_H
-#define HETERO_BRAIN_BRIDGE_SNN_FEEDBACK_H
+#ifndef VITA_BRIDGE_SNN_FEEDBACK_H
+#define VITA_BRIDGE_SNN_FEEDBACK_H
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 class SnnFeedbackSink {
@@ -29,6 +29,6 @@ public:
 };
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_SNN_FEEDBACK_H
+#endif  // VITA_BRIDGE_SNN_FEEDBACK_H

@@ -1,9 +1,9 @@
-# HeteroBrain 默认配置
+# vita 默认配置
 # ====================
 # 异构中文对话 AI 引擎运行配置
 
 engine:
-  name: "HeteroBrain v0.1"
+  name: "vita v0.1"
   mode: "interactive"           # interactive | batch | eval
   device: "auto"                # auto | cpu | cuda
 
@@ -60,5 +60,5 @@ online_learning:
 # =============================================================================
 logging:
   level: "info"                 # debug | info | warn | error
-  file: "logs/heterobrain.log"
+  file: "logs/vita.log"
   console: true

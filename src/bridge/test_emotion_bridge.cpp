@@ -21,7 +21,7 @@
 #include "emotion_prompt.h"
 #include "emotion_types.h"
 
-using namespace hb::bridge;
+using namespace vita::bridge;
 
 namespace {
 

@@ -25,7 +25,7 @@
 #include "http_server.h"            // OpenAI 兼容 serve 模式
 #include "mini_json.h"
 
-namespace hb {
+namespace vita {
 namespace engine {
 
 // -----------------------------------------------------------------------------
@@ -587,4 +587,4 @@ int EmotionEngine::run_serve() {
 }
 
 }  // namespace engine
-}  // namespace hb
+}  // namespace vita

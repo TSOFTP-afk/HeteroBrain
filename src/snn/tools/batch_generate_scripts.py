@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Qwen 批量化剧本生成器 — few-shot 引导 + 校验 + target 计算
 ============================================================
-调用本地 heterobrain_engine serve (OpenAI 兼容端点), 用 few-shot 范例
+调用本地 vita_engine serve (OpenAI 兼容端点), 用 few-shot 范例
 引导 Qwen3-4B 生成符合规范的剧本段, 校验后计算调质 target。
 
 用法:

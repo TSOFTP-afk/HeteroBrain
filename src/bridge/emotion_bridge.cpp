@@ -1,6 +1,6 @@
 #include "emotion_bridge.h"
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 void EmotionBridge::attach_backend(LlmBackend* backend) { backend_ = backend; }
@@ -20,16 +20,16 @@ SamplerParams EmotionBridge::compute_sampler_params() const {
 }
 
 std::vector<std::pair<std::string, float>> EmotionBridge::compute_logit_bias() const {
-    return ::hb::bridge::compute_logit_bias(state_);
+    return ::vita::bridge::compute_logit_bias(state_);
 }
 
 std::string EmotionBridge::build_mood_description() const {
     // 限定命名空间调用, 避免成员函数同名递归
-    return ::hb::bridge::build_mood_description(state_);
+    return ::vita::bridge::build_mood_description(state_);
 }
 
 std::string EmotionBridge::build_system_prompt_snippet() const {
-    return ::hb::bridge::build_system_prompt_snippet(state_);
+    return ::vita::bridge::build_system_prompt_snippet(state_);
 }
 
 int EmotionBridge::apply_to_generation() {
@@ -83,4 +83,4 @@ int EmotionBridge::process_turn(const std::string& role, const std::string& text
 }
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita

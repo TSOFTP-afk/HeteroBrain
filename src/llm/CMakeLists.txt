@@ -6,7 +6,7 @@
 #
 # 链接方式 (默认): 预编译静态库 F:\hb_build (llama.lib + ggml*.lib + CUDA libs),
 #   链接清单与 llama-simple-chat.exe 一致 (F:\hb_build\build.ninja L5688 验证)。
-# 备选: HETEROBRAIN_USE_LLAMA_SUBDIR=ON 时从 third_party/llama.cpp 源码构建。
+# 备选: VITA_USE_LLAMA_SUBDIR=ON 时从 third_party/llama.cpp 源码构建。
 #
 # 演进槽位 (后续实现):
 #   tokenizer_bridge / prompt_builder / logit_bias 情感偏置
@@ -31,9 +31,9 @@ set(HB_LLAMA_BUILD   "F:/hb_build"         CACHE PATH "llama.cpp prebuilt build 
 set(HB_CUDA_LIB      "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.3/lib/x64"
     CACHE PATH "CUDA toolkit lib dir")
 
-option(HETEROBRAIN_USE_LLAMA_SUBDIR "Build llama.cpp from source (third_party/llama.cpp)" OFF)
+option(VITA_USE_LLAMA_SUBDIR "Build llama.cpp from source (third_party/llama.cpp)" OFF)
 
-if(HETEROBRAIN_USE_LLAMA_SUBDIR)
+if(VITA_USE_LLAMA_SUBDIR)
     add_subdirectory(third_party/llama.cpp)
     set(LLAMA_TARGET llama)
 else()

@@ -15,8 +15,8 @@
 //   });
 // =============================================================================
 
-#ifndef HETERO_BRAIN_HTTP_SERVER_H
-#define HETERO_BRAIN_HTTP_SERVER_H
+#ifndef VITA_HTTP_SERVER_H
+#define VITA_HTTP_SERVER_H
 
 #include <cstdio>
 #include <cstring>
@@ -36,7 +36,7 @@
 #error "http_server.h: 当前仅支持 Windows (Winsock2)"
 #endif
 
-namespace hb {
+namespace vita {
 namespace net {
 
 struct HttpRequest {
@@ -247,6 +247,6 @@ private:
 };
 
 }  // namespace net
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_HTTP_SERVER_H
+#endif  // VITA_HTTP_SERVER_H

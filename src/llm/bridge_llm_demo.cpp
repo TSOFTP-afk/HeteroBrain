@@ -15,7 +15,7 @@
 #include "bridge/emotion_event.h"
 #include "llm/llama_backend.h"
 
-using namespace hb;
+using namespace vita;
 
 // -----------------------------------------------------------------------------
 // DemoSink — 模拟 SNN 反馈接收端

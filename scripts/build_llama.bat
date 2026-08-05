@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM HeteroBrain - llama.cpp 编译脚本 (CUDA + RTX 3060 sm_86)
+REM vita - llama.cpp 编译脚本 (CUDA + RTX 3060 sm_86)
 REM ============================================================
 REM 在 VS 2022 x64 环境下 cmake + ninja 编译 llama.cpp
 REM 输出: third_party/llama.cpp/build/bin/Release/llama-cli.exe

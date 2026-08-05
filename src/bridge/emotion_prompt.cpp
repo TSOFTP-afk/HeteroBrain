@@ -2,7 +2,7 @@
 
 #include <cstdio>
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 namespace {
@@ -55,4 +55,4 @@ std::string build_system_prompt_snippet(const EmotionState& s) {
 }
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita

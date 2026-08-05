@@ -2,7 +2,7 @@
 // main.cpp — 异构引擎 CLI 入口
 // =============================================================================
 // 用法:
-//   heterobrain_engine.exe --resume <snn.ckpt> --llm <model.gguf>
+//   vita_engine.exe --resume <snn.ckpt> --llm <model.gguf>
 //                          [--mod-interval N] [--steps-per-turn N]
 //                          [--freeze-weights] [--device N]
 //                          [--memory-budget-mb N]
@@ -68,7 +68,7 @@ void print_usage(const char* argv0) {
 
 int main(int argc, char** argv) {
     setup_console_utf8();
-    hb::engine::EmotionEngine::Options opt;
+    vita::engine::EmotionEngine::Options opt;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--resume") == 0 && i + 1 < argc) {
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    hb::engine::EmotionEngine engine(opt);
+    vita::engine::EmotionEngine engine(opt);
     if (!engine.is_ready()) {
         std::fprintf(stderr, "[main] engine initialization failed\n");
         return 1;

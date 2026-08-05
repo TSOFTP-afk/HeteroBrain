@@ -11,8 +11,8 @@
 //     远快于训练模式 100 步 ≈ 14s (scheduler 慢时间尺度已参数化)
 // =============================================================================
 
-#ifndef HETERO_BRAIN_ENGINE_H
-#define HETERO_BRAIN_ENGINE_H
+#ifndef VITA_ENGINE_H
+#define VITA_ENGINE_H
 
 #include <memory>
 #include <string>
@@ -21,7 +21,7 @@
 #include "bridge/emotion_bridge.h"
 #include "llm/llama_backend.h"
 
-namespace hb {
+namespace vita {
 namespace engine {
 
 class EmotionEngine {
@@ -91,6 +91,6 @@ private:
 };
 
 }  // namespace engine
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_ENGINE_H
+#endif  // VITA_ENGINE_H

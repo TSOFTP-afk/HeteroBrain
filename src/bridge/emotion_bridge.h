@@ -12,8 +12,8 @@
 //           不侵入本编排器。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_EMOTION_BRIDGE_H
-#define HETERO_BRAIN_BRIDGE_EMOTION_BRIDGE_H
+#ifndef VITA_BRIDGE_EMOTION_BRIDGE_H
+#define VITA_BRIDGE_EMOTION_BRIDGE_H
 
 #include <string>
 #include "affective_mapping.h"
@@ -23,7 +23,7 @@
 #include "llm_backend.h"
 #include "snn_feedback.h"
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 class EmotionBridge {
@@ -74,6 +74,6 @@ private:
 };
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_EMOTION_BRIDGE_H
+#endif  // VITA_BRIDGE_EMOTION_BRIDGE_H

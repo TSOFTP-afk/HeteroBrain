@@ -5,17 +5,17 @@
 //   1. 桥接层不依赖 SNN 头文件 (modulatory_kernels.cuh) 与 llama.cpp 头文件,
 //      只通过本文件定义的数据契约与两个 SPI 接口 (llm_backend.h / snn_feedback.h)
 //      交互。EmotionState 与 SNN 的 AffectiveState 字段一一对应, 由引擎边界
-//      (heterobrain engine) 做一次字段拷贝, 保持桥接层解耦、可独立构建测试。
+//      (vita engine) 做一次字段拷贝, 保持桥接层解耦、可独立构建测试。
 //   2. 扩展性: 新增情感维度 / 采样器参数时在此追加字段即可, 默认值保证
 //      既有调用方与适配器不受影响 (向后兼容)。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_EMOTION_TYPES_H
-#define HETERO_BRAIN_BRIDGE_EMOTION_TYPES_H
+#ifndef VITA_BRIDGE_EMOTION_TYPES_H
+#define VITA_BRIDGE_EMOTION_TYPES_H
 
 #include <cstdint>
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 // -----------------------------------------------------------------------------
@@ -97,6 +97,6 @@ struct MappingConfig {
 };
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_EMOTION_TYPES_H
+#endif  // VITA_BRIDGE_EMOTION_TYPES_H

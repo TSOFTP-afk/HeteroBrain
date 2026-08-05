@@ -13,8 +13,8 @@
 //   置于采样器链首, 生成期逐 token 对候选 logits 加性改写 (见 apply_logit_bias)。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_LLM_LLAMA_BACKEND_H
-#define HETERO_BRAIN_LLM_LLAMA_BACKEND_H
+#ifndef VITA_LLM_LLAMA_BACKEND_H
+#define VITA_LLM_LLAMA_BACKEND_H
 
 #include <cstdint>
 #include <string>
@@ -32,7 +32,7 @@ struct llama_context;
 struct llama_sampler;
 struct llama_vocab;
 
-namespace hb {
+namespace vita {
 namespace llm {
 
 // -----------------------------------------------------------------------------
@@ -117,6 +117,6 @@ private:
 };
 
 }  // namespace llm
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_LLM_LLAMA_BACKEND_H
+#endif  // VITA_LLM_LLAMA_BACKEND_H

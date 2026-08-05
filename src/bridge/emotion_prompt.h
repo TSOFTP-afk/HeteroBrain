@@ -6,13 +6,13 @@
 //   build_system_prompt_snippet — 追加到 system prompt 的情感上下文 (含共情级别)
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_EMOTION_PROMPT_H
-#define HETERO_BRAIN_BRIDGE_EMOTION_PROMPT_H
+#ifndef VITA_BRIDGE_EMOTION_PROMPT_H
+#define VITA_BRIDGE_EMOTION_PROMPT_H
 
 #include <string>
 #include "emotion_types.h"
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 // 单句心情描述: "当前情感: 愉悦、兴奋、主动 (愉悦 0.50, 唤醒 0.40, 主导 0.60, 共情 0.80)"
@@ -22,6 +22,6 @@ std::string build_mood_description(const EmotionState& state);
 std::string build_system_prompt_snippet(const EmotionState& state);
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_EMOTION_PROMPT_H
+#endif  // VITA_BRIDGE_EMOTION_PROMPT_H

@@ -1,17 +1,17 @@
 # =============================================================================
-# HeteroBrain — 顶层 CMake 构建文件
+# vita — 顶层 CMake 构建文件
 # =============================================================================
 # 异构中文对话 AI 引擎: SNN (CUDA) + LLM (llama.cpp/MiniCPM5-1B) + Bridge
 #
 # 构建目标:
-#   heterobrain_engine  - 主引擎可执行文件
+#   vita_engine  - 主引擎可执行文件
 #   snn_subsystem       - SNN 子系统静态库
 #   llm_subsystem       - LLM 子系统静态库
 #   bridge_subsystem    - Bridge 转换层静态库
 # =============================================================================
 
 cmake_minimum_required(VERSION 3.18)
-project(HeteroBrain
+project(vita
     VERSION 0.1.0
     DESCRIPTION "异构中文对话 AI 引擎 (SNN × LLM)"
     LANGUAGES CXX CUDA
@@ -20,10 +20,10 @@ project(HeteroBrain
 # =============================================================================
 # 全局选项
 # =============================================================================
-option(HETEROBRAIN_BUILD_TESTS    "Build test suite"           ON)
-option(HETEROBRAIN_ENABLE_CUDA    "Enable CUDA SNN subsystem"  ON)
-option(HETEROBRAIN_ENABLE_LLM     "Enable LLM subsystem"       ON)
-option(HETEROBRAIN_BUILD_SHARED   "Build shared libs"          OFF)
+option(VITA_BUILD_TESTS    "Build test suite"           ON)
+option(VITA_ENABLE_CUDA    "Enable CUDA SNN subsystem"  ON)
+option(VITA_ENABLE_LLM     "Enable LLM subsystem"       ON)
+option(VITA_BUILD_SHARED   "Build shared libs"          OFF)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -38,7 +38,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # CUDA 架构: sm_86 (RTX 30/40/A) + sm_120 (DGX Spark GB10)
-if(HETEROBRAIN_ENABLE_CUDA)
+if(VITA_ENABLE_CUDA)
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
         set(CMAKE_CUDA_ARCHITECTURES "86;120")
     endif()
@@ -76,12 +76,12 @@ include_directories(${CMAKE_SOURCE_DIR}/third_party)
 add_subdirectory(src/snn)
 add_subdirectory(src/llm)
 add_subdirectory(src/bridge)
-add_subdirectory(src/heterobrain)
+add_subdirectory(src/vita)
 
 # =============================================================================
 # 测试
 # =============================================================================
-if(HETEROBRAIN_BUILD_TESTS)
+if(VITA_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -89,15 +89,15 @@ endif()
 # =============================================================================
 # 安装
 # =============================================================================
-# heterobrain_engine 目标由 src/heterobrain 的 if(ENGINE_SRCS) 保护, 未实现时优雅跳过
-if(TARGET heterobrain_engine)
-    install(TARGETS heterobrain_engine
+# vita_engine 目标由 src/vita 的 if(ENGINE_SRCS) 保护, 未实现时优雅跳过
+if(TARGET vita_engine)
+    install(TARGETS vita_engine
         RUNTIME DESTINATION bin
     )
 endif()
 
 install(DIRECTORY configs/
-    DESTINATION etc/heterobrain
+    DESTINATION etc/vita
     FILES_MATCHING PATTERN "*.yaml"
 )
 
@@ -105,12 +105,12 @@ install(DIRECTORY configs/
 # 信息输出
 # =============================================================================
 message(STATUS "============================================================")
-message(STATUS "HeteroBrain ${PROJECT_VERSION}")
+message(STATUS "vita ${PROJECT_VERSION}")
 message(STATUS "  Build type:       ${CMAKE_BUILD_TYPE}")
-message(STATUS "  CUDA enabled:     ${HETEROBRAIN_ENABLE_CUDA}")
-message(STATUS "  LLM enabled:      ${HETEROBRAIN_ENABLE_LLM}")
-if(HETEROBRAIN_ENABLE_CUDA)
+message(STATUS "  CUDA enabled:     ${VITA_ENABLE_CUDA}")
+message(STATUS "  LLM enabled:      ${VITA_ENABLE_LLM}")
+if(VITA_ENABLE_CUDA)
     message(STATUS "  CUDA archs:       ${CMAKE_CUDA_ARCHITECTURES}")
 endif()
-message(STATUS "  Tests:            ${HETEROBRAIN_BUILD_TESTS}")
+message(STATUS "  Tests:            ${VITA_BUILD_TESTS}")
 message(STATUS "============================================================")

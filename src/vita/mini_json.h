@@ -8,8 +8,8 @@
 // 不做: 数字精度控制、注释、流式解析。错误时返回 false 并可选写错误信息。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_MINI_JSON_H
-#define HETERO_BRAIN_MINI_JSON_H
+#ifndef VITA_MINI_JSON_H
+#define VITA_MINI_JSON_H
 
 #include <cstdio>
 #include <cstdlib>
@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-namespace hb {
+namespace vita {
 namespace json {
 
 class Value {
@@ -373,6 +373,6 @@ inline std::string dump(const Value& v) {
 }
 
 }  // namespace json
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_MINI_JSON_H
+#endif  // VITA_MINI_JSON_H

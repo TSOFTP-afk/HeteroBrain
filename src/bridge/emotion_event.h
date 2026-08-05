@@ -14,13 +14,13 @@
 //   DA↑ 愉悦 / NE↑ 唤醒 / 5HT↑ 镇静低落 / GABA↑ 平静 / Oxy↑ 共情
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_EMOTION_EVENT_H
-#define HETERO_BRAIN_BRIDGE_EMOTION_EVENT_H
+#ifndef VITA_BRIDGE_EMOTION_EVENT_H
+#define VITA_BRIDGE_EMOTION_EVENT_H
 
 #include <string>
 #include <vector>
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 // -----------------------------------------------------------------------------
@@ -66,6 +66,6 @@ private:
 };
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_EMOTION_EVENT_H
+#endif  // VITA_BRIDGE_EMOTION_EVENT_H

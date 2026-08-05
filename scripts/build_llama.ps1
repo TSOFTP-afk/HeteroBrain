@@ -1,4 +1,4 @@
-# Build llama.cpp with CUDA for HeteroBrain (RTX 3060 sm_86)
+# Build llama.cpp with CUDA for vita (RTX 3060 sm_86)
 # Loads VS 2022 x64 dev shell, runs cmake + ninja, outputs llama-cli.exe
 $ErrorActionPreference = "Stop"
 

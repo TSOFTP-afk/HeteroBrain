@@ -4,15 +4,15 @@
 // 确定性纯函数, 便于单元测试与离线调参。映射系数见 MappingConfig (emotion_types.h)。
 // =============================================================================
 
-#ifndef HETERO_BRAIN_BRIDGE_AFFECTIVE_MAPPING_H
-#define HETERO_BRAIN_BRIDGE_AFFECTIVE_MAPPING_H
+#ifndef VITA_BRIDGE_AFFECTIVE_MAPPING_H
+#define VITA_BRIDGE_AFFECTIVE_MAPPING_H
 
 #include <string>
 #include <utility>
 #include <vector>
 #include "emotion_types.h"
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 // 情感状态 → LLM 采样参数 (线性叠加 + 硬边界 clamp)
@@ -27,6 +27,6 @@ SamplerParams map_to_sampler_params(const EmotionState& state,
 std::vector<std::pair<std::string, float>> compute_logit_bias(const EmotionState& state);
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita
 
-#endif  // HETERO_BRAIN_BRIDGE_AFFECTIVE_MAPPING_H
+#endif  // VITA_BRIDGE_AFFECTIVE_MAPPING_H

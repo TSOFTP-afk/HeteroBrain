@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <cstring>
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 namespace {
@@ -164,4 +164,4 @@ EmotionEvent EmotionEventExtractor::extract(const std::string& text) const {
 }
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita

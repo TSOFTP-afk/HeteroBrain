@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HeteroBrain 模型权重下载脚本
+vita 模型权重下载脚本
 
 下载 MiniCPM5-1B INT4 GGUF 等模型到 models/ 目录。
 """
@@ -50,7 +50,7 @@ def download(url: str, dest: Path, size_gb: float) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="HeteroBrain 模型下载")
+    parser = argparse.ArgumentParser(description="vita 模型下载")
     parser.add_argument("--model", required=True, choices=MODELS.keys(), help="模型名称")
     parser.add_argument("--output-dir", default="models", help="输出目录")
     args = parser.parse_args()

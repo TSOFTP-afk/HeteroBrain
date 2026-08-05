@@ -4,7 +4,7 @@
 #include <utility>
 #include <vector>
 
-namespace hb {
+namespace vita {
 namespace bridge {
 
 namespace {
@@ -126,4 +126,4 @@ std::vector<std::pair<std::string, float>> compute_logit_bias(const EmotionState
 }
 
 }  // namespace bridge
-}  // namespace hb
+}  // namespace vita

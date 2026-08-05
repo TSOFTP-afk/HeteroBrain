@@ -17,7 +17,7 @@
 
 #include "llama.h"
 
-namespace hb {
+namespace vita {
 namespace llm {
 
 namespace {
@@ -402,4 +402,4 @@ int LlamaBackend::generate(const std::string& prompt, std::string& response) {
 }
 
 }  // namespace llm
-}  // namespace hb
+}  // namespace vita

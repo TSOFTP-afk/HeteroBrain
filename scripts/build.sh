@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-HeteroBrain 构建脚本 (Linux / WSL)
+vita 构建脚本 (Linux / WSL)
 
 用法:
     ./scripts/build.sh           # Release 构建
@@ -39,12 +39,12 @@ def main():
 
     # 编译
     if generator == "Ninja":
-        run("ninja heterobrain_engine", cwd=BUILD)
+        run("ninja vita_engine", cwd=BUILD)
     else:
-        run("make heterobrain_engine -j$(nproc)", cwd=BUILD)
+        run("make vita_engine -j$(nproc)", cwd=BUILD)
 
-    print(f"\n构建完成: {BUILD}/heterobrain_engine")
-    print(f"运行: ./{BUILD.relative_to(ROOT)}/heterobrain_engine --interactive")
+    print(f"\n构建完成: {BUILD}/vita_engine")
+    print(f"运行: ./{BUILD.relative_to(ROOT)}/vita_engine --interactive")
 
 
 if __name__ == "__main__":

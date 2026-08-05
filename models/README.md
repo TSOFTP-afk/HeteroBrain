@@ -1,6 +1,6 @@
 # 模型权重目录
 
-本目录存放 HeteroBrain 运行所需的模型权重。**大文件不入库**，请用 `scripts/download_models.py` 下载。
+本目录存放 vita 运行所需的模型权重。**大文件不入库**，请用 `scripts/download_models.py` 下载。
 
 ## 必需文件
 
