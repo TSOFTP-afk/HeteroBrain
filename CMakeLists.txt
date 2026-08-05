@@ -45,7 +45,10 @@ if(HETEROBRAIN_ENABLE_CUDA)
     enable_language(CUDA)
     set(CMAKE_CUDA_STANDARD 17)
     if(MSVC)
-        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /wd4819 /wd4505")
+        # 注意: -Xcompiler 参数必须逗号分隔 (/wd4819,/wd4505),
+        # 空格分隔会让第二个 /wd 选项变成游离 token 被 nvcc 当作输入文件
+        # (nvcc fatal: single input file required; 2026-08-05 踩坑)
+        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler=/wd4819,/wd4505")
     else()
         set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -Wno-deprecated-declarations")
     endif()

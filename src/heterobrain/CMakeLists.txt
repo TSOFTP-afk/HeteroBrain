@@ -1,48 +1,97 @@
 # =============================================================================
-# HeteroBrain 顶层引擎 — 异构主循环
+# HeteroBrain 顶层引擎 — 异构主循环 (SNN 情感核心 + EmotionBridge + LLM 进程内接线)
 # =============================================================================
 # 模块:
-#   engine  - 异构引擎主循环 (输入 → SNN 检索 → LLM 生成 → 真实性筛选 → 输出)
-#   config  - YAML 配置加载
-#   main    - CLI 入口 (--interactive / --batch / --eval)
+#   engine  - EmotionEngine: 对话主循环 (事件注入 → 训练推进 → 情感调制 → LLM 生成)
+#   main    - CLI 入口 (--resume <snn.ckpt> --llm <model.gguf> ...)
+#
+# 依赖: src/snn 核心源 (直接编译进引擎, 规避静态库 PDB nvcc bug)
+#       + llm_subsystem (llama.cpp) + bridge_subsystem
 # =============================================================================
 
-# Phase 3b-3f 实现后恢复源文件列表 (当前模块未实现, ENGINE_SRCS 为空):
+find_package(CUDAToolkit REQUIRED)
+
 set(ENGINE_SRCS
-    # engine.cpp
-    # config.cpp
-    # main.cpp
+    engine.cpp
+    main.cpp
 )
 
 set(ENGINE_HEADERS
-    # engine.h
-    # config.h
+    engine.h
+    http_server.h
+    mini_json.h
 )
 
-# 仅在源文件就绪时才定义可执行目标 (Phase 3b-3f 前优雅跳过)
-if(ENGINE_SRCS)
-    add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS})
+# =============================================================================
+# SNN 核心源: 直接编译进引擎 (可执行目标, 复用目录形式 PDB, 规避静态库 nvcc bug)
+# 排除: main.cpp/decoder_main.cpp/test_*.cpp (各自含 main())
+# =============================================================================
+file(GLOB SNN_CORE_SRCS CONFIGURE_DEPENDS
+    ${CMAKE_SOURCE_DIR}/src/snn/*.cu
+    ${CMAKE_SOURCE_DIR}/src/snn/*.cpp)
+list(REMOVE_ITEM SNN_CORE_SRCS
+    ${CMAKE_SOURCE_DIR}/src/snn/main.cpp
+    ${CMAKE_SOURCE_DIR}/src/snn/decoder_main.cpp
+    ${CMAKE_SOURCE_DIR}/src/snn/test_embodied.cpp
+    ${CMAKE_SOURCE_DIR}/src/snn/test_event_scheduler.cpp)
 
-    target_link_libraries(heterobrain_engine
-        PRIVATE
-            snn_subsystem
-            llm_subsystem
-            bridge_subsystem
+add_executable(heterobrain_engine ${ENGINE_SRCS} ${ENGINE_HEADERS} ${SNN_CORE_SRCS})
+
+target_link_libraries(heterobrain_engine
+    PRIVATE
+        llm_subsystem
+        bridge_subsystem
+        CUDA::cudart
+        ws2_32
+)
+
+target_include_directories(heterobrain_engine
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/snn
+        ${CUDAToolkit_INCLUDE_DIRS}
+)
+
+# decoder.cu 实为 host 代码 (与 src/snn 的 snn_decoder 一致), 强制 CXX 编译加速
+set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/src/snn/decoder.cu
+    PROPERTIES LANGUAGE CXX
+)
+
+# CUDA 编译属性 (与 snn_train 一致): sm_86 + 可分离编译 + -O3
+target_compile_options(heterobrain_engine PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-O3>
+    $<$<COMPILE_LANGUAGE:CUDA>:--ptxas-options=-v>
+)
+
+set_target_properties(heterobrain_engine PROPERTIES
+    CUDA_ARCHITECTURES "86"
+    CUDA_SEPARABLE_COMPILATION ON
+)
+
+# 同一进程内两个 CUDA 使用者 (SNN kernels + ggml-cuda) 共享 cudart
+# 引擎链接 snn_subsystem (CUDA::cudart 传播) + llama_prebuilt (CUDA libs 传播)
+
+if(MSVC)
+    target_compile_options(heterobrain_engine PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+        $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4244>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4267>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4305>
+        $<$<COMPILE_LANGUAGE:CXX>:/bigobj>
     )
-
-    target_include_directories(heterobrain_engine
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}
-    )
-
-    # 安装
-    install(TARGETS heterobrain_engine
-        RUNTIME DESTINATION bin
+else()
+    target_compile_options(heterobrain_engine PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wno-unused-parameter>
     )
 endif()
 
-# TODO: Phase 1 实现 main.cpp 的最小骨架:
-#   1. 解析命令行: --llm <gguf> --config <yaml> --interactive
-#   2. 加载 LLM (llama_runner)
-#   3. 进入交互循环: getline → prompt_build → llama_infer → print
-#   4. Phase 2 后增加: --snn <ckpt> 加载 SNN 子系统
+set_target_properties(heterobrain_engine PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# 安装
+install(TARGETS heterobrain_engine
+    RUNTIME DESTINATION bin
+)

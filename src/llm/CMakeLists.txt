@@ -1,40 +1,118 @@
 # =============================================================================
-# LLM 子系统 — MiniCPM5-1B INT4 GGUF + llama.cpp
+# LLM 子系统 — 进程内 llama.cpp (MiniCPM5-1B INT4 GGUF)
 # =============================================================================
 # 模块:
-#   llama_runner     - llama.cpp 推理封装 (单例, 复用模型上下文)
-#   tokenizer_bridge - BPE 分词器 (与 SNN BPE 数据流对齐)
-#   prompt_builder   - 上下文构造 (用户输入 + SNN 检索 + RAG 知识)
+#   llama_backend  - LlmBackend SPI 适配器 (模型加载 / 采样器链 / chat 生成)
+#
+# 链接方式 (默认): 预编译静态库 F:\hb_build (llama.lib + ggml*.lib + CUDA libs),
+#   链接清单与 llama-simple-chat.exe 一致 (F:\hb_build\build.ninja L5688 验证)。
+# 备选: HETEROBRAIN_USE_LLAMA_SUBDIR=ON 时从 third_party/llama.cpp 源码构建。
+#
+# 演进槽位 (后续实现):
+#   tokenizer_bridge / prompt_builder / logit_bias 情感偏置
 # =============================================================================
 
-# Phase 1 实现后恢复源文件列表 (当前 LLM_SRCS 为空, 走下方 else() 空库分支):
+cmake_minimum_required(VERSION 3.18)
+project(llm_subsystem LANGUAGES CXX)
+
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+# =============================================================================
+# llama.cpp 预编译产物路径 (可缓存覆盖)
+# =============================================================================
+set(HB_LLAMA_INCLUDE "F:/hb_llama/include" CACHE PATH "llama.cpp include dir")
+set(HB_LLAMA_BUILD   "F:/hb_build"         CACHE PATH "llama.cpp prebuilt build dir")
+set(HB_CUDA_LIB      "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.3/lib/x64"
+    CACHE PATH "CUDA toolkit lib dir")
+
+option(HETEROBRAIN_USE_LLAMA_SUBDIR "Build llama.cpp from source (third_party/llama.cpp)" OFF)
+
+if(HETEROBRAIN_USE_LLAMA_SUBDIR)
+    add_subdirectory(third_party/llama.cpp)
+    set(LLAMA_TARGET llama)
+else()
+    add_library(llama_prebuilt INTERFACE)
+    target_include_directories(llama_prebuilt INTERFACE
+        ${HB_LLAMA_INCLUDE}            # llama.h
+        ${HB_LLAMA_INCLUDE}/../ggml/include  # ggml.h / gguf.h
+    )
+    target_link_libraries(llama_prebuilt INTERFACE
+        ${HB_LLAMA_BUILD}/src/llama.lib
+        ${HB_LLAMA_BUILD}/ggml/src/ggml.lib
+        ${HB_LLAMA_BUILD}/ggml/src/ggml-cpu.lib
+        ${HB_LLAMA_BUILD}/ggml/src/ggml-cuda/ggml-cuda.lib
+        ${HB_LLAMA_BUILD}/ggml/src/ggml-base.lib
+        ${HB_CUDA_LIB}/cudart.lib
+        ${HB_CUDA_LIB}/cublas.lib
+        ${HB_CUDA_LIB}/cublasLt.lib
+        ${HB_CUDA_LIB}/cuda.lib
+    )
+    set(LLAMA_TARGET llama_prebuilt)
+endif()
+
+# =============================================================================
+# Target: llm_subsystem
+# =============================================================================
 set(LLM_SRCS
-    # llama_runner.cpp
+    llama_backend.cpp
+    # 未来模块在此追加:
     # tokenizer_bridge.cpp
     # prompt_builder.cpp
 )
 
 set(LLM_HEADERS
-    # llama_runner.h
-    # tokenizer_bridge.h
-    # prompt_builder.h
+    llama_backend.h
 )
 
-# Phase 1 占位: 暂无源文件, 用 INTERFACE 空库保持 CMake 结构
-if(LLM_SRCS)
-    add_library(llm_subsystem STATIC ${LLM_SRCS} ${LLM_HEADERS})
-else()
-    add_library(llm_subsystem INTERFACE)
-endif()
+add_library(llm_subsystem STATIC ${LLM_SRCS} ${LLM_HEADERS})
 
 target_include_directories(llm_subsystem
-    INTERFACE
+    PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
-        ${CMAKE_SOURCE_DIR}/third_party
+        ${CMAKE_SOURCE_DIR}/src
+    PRIVATE
+        ${HB_LLAMA_INCLUDE}
 )
 
-# TODO: Phase 1 实现 —
-#   1. 引入 llama.cpp 作为 third_party/llama.cpp 子模块
-#   2. 实现 llama_runner.cpp: 加载 GGUF, 单批推理, 流式输出
-#   3. 实现 tokenizer_bridge.cpp: BPE 编码/解码 (与 SNN BPE stream 对齐)
-#   4. 实现 prompt_builder.cpp: 拼接 system + history + snn_context + user
+target_link_libraries(llm_subsystem PUBLIC ${LLAMA_TARGET})
+
+if(MSVC)
+    target_compile_options(llm_subsystem PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4244>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4267>
+        $<$<COMPILE_LANGUAGE:CXX>:/wd4305>
+    )
+else()
+    target_compile_options(llm_subsystem PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:-Wall;-Wextra;-Wno-unused-parameter>
+    )
+endif()
+
+# =============================================================================
+# Target: bridge_llm_demo (全链路验证: EmotionBridge → LlamaBackend → MiniCPM5)
+# =============================================================================
+add_executable(bridge_llm_demo
+    ${CMAKE_CURRENT_SOURCE_DIR}/bridge_llm_demo.cpp
+)
+
+target_link_libraries(bridge_llm_demo PRIVATE
+    llm_subsystem
+    bridge_subsystem
+)
+
+if(MSVC)
+    target_compile_options(bridge_llm_demo PRIVATE
+        $<$<COMPILE_LANGUAGE:CXX>:/utf-8>
+    )
+endif()
+
+set_target_properties(bridge_llm_demo PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)

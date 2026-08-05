@@ -8,3 +8,4 @@
 
 add_test(NAME test_event_scheduler COMMAND test_event_scheduler)
 add_test(NAME test_embodied COMMAND test_embodied)
+add_test(NAME test_emotion_bridge COMMAND test_emotion_bridge)
