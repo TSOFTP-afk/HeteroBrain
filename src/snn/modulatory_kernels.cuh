@@ -53,7 +53,8 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
                        float prediction_error_norm,
                        float empathy_signal = 0.0f,        // Phase 3a
                        const float* stage_baseline = nullptr,   // Phase 3a-D3: 阶段基线
-                       bool deterministic = false);        // 课程模式: 关闭网络依赖动力学项
+                       bool deterministic = false,          // 课程模式: 关闭网络依赖动力学项
+                       int  mod_interval = 100);           // 调制更新间隔 (衰减率/duration 按此参数化, 2026-08-05 引擎接线)
 
 // DA价值函数更新 (每100步)
 void launch_da_value_function(MemoryAllocator* alloc, int step,

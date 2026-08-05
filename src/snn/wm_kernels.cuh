@@ -38,6 +38,7 @@
 #include "config.h"
 #include "types.h"
 #include <cuda_runtime.h>
+#include <vector>
 
 namespace stage2e {
 
@@ -106,6 +107,12 @@ void launch_wm_maintain(WMSlot* d_slots, const float* d_pca_W,
 // 必须在 delay_inject (清零 input_current) 之后、lif_adex 之前调用
 void launch_merge_prefrontal_input(const float* d_pf_input, float* d_input_current,
                                    int n_pf, int pf_start);
+
+// 读工作记忆槽 (host 端, 2026-08-05 引擎对话模式新增)
+// 把 n_slots 个 WMSlot 拷回 host, 按 activation 降序, 返回最多 max_count 条。
+// 供引擎把"SNN 记住了什么"拼进 LLM system prompt。
+// 注意: WM 存的是 50 维 PCA 神经签名 (非文本), activation 高的槽 = 最近活跃模式。
+std::vector<WMSlot> read_wm_slots(const WMSlot* d_slots, int n_slots, int max_count);
 
 } // namespace stage2e
 

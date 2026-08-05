@@ -45,13 +45,25 @@ namespace stage2e {
 //   W_mod[i*6+m]  = (rand-0.5)*2*init_scale
 //   W_tool[i*7+t] = (rand-0.5)*2*init_scale
 //   W_pad[i*3+p]  = (rand-0.5)*2*init_scale   (2026-08-02 Task 5)
+//   W_conc[m*6+j] = (rand-0.5)*2*init_scale   (2026-08-04 方案2: 浓度头, 6×6)
+//     浓度头由 i==0 的线程初始化 (仅 36 个权重, 独立于神经元)
 // -----------------------------------------------------------------------------
 __global__ void curriculum_readout_init_kernel(
     float* __restrict__ readout_weights,   // [N × 6]
     float* __restrict__ tool_weights,      // [N × 7]
     float* __restrict__ pad_weights,       // [N × 3]
+    float* __restrict__ conc_weights,      // [6 × 6] 2026-08-04 方案2 (可空)
     int N, float init_scale, unsigned long long seed)
 {
+    // 浓度头 (与神经元无关, 由 block0 thread0 初始化)
+    if (conc_weights && blockIdx.x == 0 && threadIdx.x == 0) {
+        curandState cstate;
+        curand_init(seed ^ 0xC0A11Cu, 1, 0, &cstate);
+        #pragma unroll
+        for (int k = 0; k < 6 * 6; ++k) {
+            conc_weights[k] = (curand_uniform(&cstate) - 0.5f) * 2.0f * init_scale;
+        }
+    }
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
     curandState state;
@@ -107,6 +119,7 @@ void launch_curriculum_readout_init(PersistentBuffers& buf, float init_scale, un
     curriculum_readout_init_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
         buf.d_curriculum_readout_weights, buf.d_curriculum_tool_weights,
         buf.d_curriculum_pad_weights,
+        buf.d_curriculum_conc_weights,          // 2026-08-04 方案2: 浓度头 (可空)
         N_TOTAL_NEURONS_2E, init_scale, seed);
     CUDA_CHECK_LAST_2E();
 }
@@ -122,17 +135,53 @@ void launch_curriculum_pad_readout_init(PersistentBuffers& buf, float init_scale
 }
 
 // -----------------------------------------------------------------------------
+// Kernel 0c: 浓度 readout 头专用初始化 (2026-08-04 方案2)
+//   只初始化 6×6 浓度头权重, 不触碰 mod/tool/pad 头 (避免重随机化已加载权重)
+// -----------------------------------------------------------------------------
+__global__ void curriculum_conc_readout_init_kernel(
+    float* __restrict__ conc_weights,           // [6 × 6]
+    float init_scale, unsigned long long seed)
+{
+    if (threadIdx.x != 0) return;
+    curandState cstate;
+    curand_init(seed ^ 0xC0A11Cu, 1, 0, &cstate);
+    #pragma unroll
+    for (int k = 0; k < 6 * 6; ++k) {
+        conc_weights[k] = (curand_uniform(&cstate) - 0.5f) * 2.0f * init_scale;
+    }
+}
+
+void launch_curriculum_conc_readout_init(PersistentBuffers& buf, float init_scale,
+                                         unsigned long long seed)
+{
+    if (!buf.d_curriculum_conc_weights) return;
+    curriculum_conc_readout_init_kernel<<<1, 1>>>(
+        buf.d_curriculum_conc_weights, init_scale, seed);
+    CUDA_CHECK_LAST_2E();
+}
+
+// -----------------------------------------------------------------------------
 // Kernel 1a: 调质 readout 前向
 //   logits[m] = Σ_i W_mod[i*6+m] · rate[i]   (m ∈ [0,6))
+//             + Σ_j W_conc[m*6+j] · conc[j]  (2026-08-04 方案2: 浓度头并联)
 //   用 6 个 block, 每 block 归约 60K 神经元
 //   输入为课程窗口内累计 spike 平均发放率 (rate ∈ [0,1]),
 //   而非最后一帧 spike — 事件调质在窗口内持续调制发放,
 //   累计率比单帧更能编码"知识链 vs 情感链"的事件类型信号
+//   浓度头: conc[j] = 网络调质浓度 (各神经元相同, 读 [0]),
+//     顺序与 readout 通道一致 [DA, ACh, NE, 5HT, GABA, Oxy]
 // -----------------------------------------------------------------------------
 __global__ void curriculum_readout_forward_kernel(
     float* __restrict__ logits,                 // [6]
     const float* __restrict__ readout_weights,  // [N × 6]
     const float* __restrict__ spike_rates,      // [N] 累计平均发放率
+    const float* __restrict__ conc_weights,     // [6×6] 2026-08-04 方案2 (可空)
+    const float* __restrict__ da_conc,          // [N] 网络浓度 (读 [0])
+    const float* __restrict__ ach_conc,
+    const float* __restrict__ ne_conc,
+    const float* __restrict__ ht5_conc,
+    const float* __restrict__ gaba_conc,
+    const float* __restrict__ oxy_conc,
     int N)
 {
     const int m = blockIdx.x;                   // 0..5
@@ -152,7 +201,18 @@ __global__ void curriculum_readout_forward_kernel(
         if (threadIdx.x < s) sdata[threadIdx.x] += sdata[threadIdx.x + s];
         __syncthreads();
     }
-    if (threadIdx.x == 0) logits[m] = sdata[0];
+    if (threadIdx.x == 0) {
+        float out = sdata[0];
+        // 2026-08-04 方案2: 浓度头 (浓度缓冲缺失时跳过)
+        if (conc_weights && da_conc) {
+            const float conc[6] = { da_conc[0], ach_conc[0], ne_conc[0],
+                                    ht5_conc[0], gaba_conc[0], oxy_conc[0] };
+            const float* crow = conc_weights + m * 6;
+            #pragma unroll
+            for (int j = 0; j < 6; ++j) out += crow[j] * conc[j];
+        }
+        logits[m] = out;
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -355,20 +415,46 @@ __global__ void curriculum_backprop_kernel(
 //   W_mod[i*6+m]  -= lr·w_mod·err_mod[m]·rate[i]
 //   W_tool[i*7+t] -= lr·w_tool·err_tool[t]·rate[i]
 //   W_pad[i*3+p]  -= lr·w_pad·err_pad[p]·rate[i]   (2026-08-02 Task 5)
+//   W_conc[m*6+j] -= lr·w_mod·err_mod[m]·conc[j]   (2026-08-04 方案2, i==0 线程)
 //   更新量按窗口累计平均发放率 rate[i] 缩放 (与 readout 前向输入一致)
+//   浓度头输入 conc[j] 为网络浓度 (各神经元相同, 读 [0])
 // -----------------------------------------------------------------------------
 __global__ void curriculum_readout_update_kernel(
     float* __restrict__ readout_weights,        // [N × 6]
     float* __restrict__ tool_weights,           // [N × 7]
     float* __restrict__ pad_weights,            // [N × 3]
+    float* __restrict__ conc_weights,           // [6×6] 2026-08-04 方案2 (可空)
     const float* __restrict__ spike_rates,      // [N] 累计平均发放率
     const float* __restrict__ mod_error,        // [6]
     const float* __restrict__ tool_error,       // [7]
     const float* __restrict__ pad_error,        // [3]
+    const float* __restrict__ da_conc,          // [N] 网络浓度 (读 [0])
+    const float* __restrict__ ach_conc,
+    const float* __restrict__ ne_conc,
+    const float* __restrict__ ht5_conc,
+    const float* __restrict__ gaba_conc,
+    const float* __restrict__ oxy_conc,
     int N, float lr, float w_mod, float w_tool, float w_pad)
 {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= N) return;
+
+    // 2026-08-04 方案2: 浓度头更新 (仅 i==0 线程, 36 个权重与神经元无关)
+    if (i == 0 && conc_weights && da_conc) {
+        const float conc[6] = { da_conc[0], ach_conc[0], ne_conc[0],
+                                ht5_conc[0], gaba_conc[0], oxy_conc[0] };
+        #pragma unroll
+        for (int m = 0; m < 6; ++m) {
+            float* crow = conc_weights + m * 6;
+            #pragma unroll
+            for (int j = 0; j < 6; ++j) {
+                float w = crow[j] - lr * w_mod * mod_error[m] * conc[j];
+                crow[j] = fminf(fmaxf(w, -CURRICULUM_READOUT_WEIGHT_CLIP),
+                                CURRICULUM_READOUT_WEIGHT_CLIP);
+            }
+        }
+    }
+
     if (spike_rates[i] <= 0.0f) return;
 
     // 2026-08-01 spec §7.8 修复: SGD 更新后裁剪权重
@@ -412,6 +498,13 @@ void launch_curriculum_readout_forward(PersistentBuffers& buf)
         buf.d_curriculum_logits,
         buf.d_curriculum_readout_weights,
         buf.d_curriculum_accum_spikes,
+        buf.d_curriculum_conc_weights,            // 2026-08-04 方案2 (可空)
+        buf.d_da_concentration,                   // 网络浓度 (读 [0])
+        buf.d_ach_concentration,
+        buf.d_ne_concentration,
+        buf.d_ht5_concentration,
+        buf.d_gaba_concentration,
+        buf.d_oxytocin_concentration,
         N_TOTAL_NEURONS_2E);
     curriculum_tool_forward_kernel<<<CURRICULUM_N_TOOL, THREADS_PER_BLOCK_2E>>>(
         buf.d_curriculum_tool_logits,
@@ -515,10 +608,17 @@ void launch_curriculum_readout_update(PersistentBuffers& buf, float lr,
         buf.d_curriculum_readout_weights,
         buf.d_curriculum_tool_weights,
         has_pad ? buf.d_curriculum_pad_weights : nullptr,
+        buf.d_curriculum_conc_weights,            // 2026-08-04 方案2 (可空)
         buf.d_curriculum_accum_spikes,
         buf.d_curriculum_error,
         buf.d_curriculum_tool_error,
         has_pad ? buf.d_curriculum_pad_error : nullptr,
+        buf.d_da_concentration,                   // 网络浓度 (读 [0])
+        buf.d_ach_concentration,
+        buf.d_ne_concentration,
+        buf.d_ht5_concentration,
+        buf.d_gaba_concentration,
+        buf.d_oxytocin_concentration,
         N_TOTAL_NEURONS_2E, lr, w_mod, w_tool, has_pad ? w_pad : 0.0f);
     CUDA_CHECK_LAST_2E();
 }
@@ -677,82 +777,6 @@ void launch_curriculum_pad_forward_frame(PersistentBuffers& buf)
         buf.d_curriculum_pad_weights,
         buf.d_spike_flags,
         N_TOTAL_NEURONS_2E);
-    CUDA_CHECK_LAST_2E();
-}
-
-// -----------------------------------------------------------------------------
-// Kernel 7 (N3F): 课程误差 → 神经元级 eligibility (教学信号注入)
-//   与 decode_eligibility_update_kernel 同构 (λ 衰减 + gain 增量 + clamp),
-//   误差源从字节预测换成课程监督 (调质 MSE 误差 + PAD MSE 误差 + 工具 CE 误差):
-//     backprop_signal[i] = Σ_m w_mod·W_mod[i,m]·err_mod[m]
-//                        + Σ_p w_pad·W_pad[i,p]·err_pad[p]
-//                        + Σ_t w_tool·W_tool[i,t]·err_tool[t]
-//     neuron_elig[i] = λ·neuron_elig[i] - g·backprop_signal[i]
-//   符号约定 (与 decode 一致): backprop = 责任, credit = -blame,
-//   STDP kernel 中 e1·neuron_eligibility 即得正确 LTP/LTD 方向。
-//   注: w_pad=0 时 PAD 项跳过 (安全默认, 不触碰空指针)
-// -----------------------------------------------------------------------------
-__global__ void curriculum_eligibility_update_kernel(
-    float* __restrict__ neuron_eligibility,     // [N] in/out
-    const float* __restrict__ readout_weights,  // [N × 6]
-    const float* __restrict__ tool_weights,     // [N × 7]
-    const float* __restrict__ pad_weights,      // [N × 3]
-    const float* __restrict__ mod_error,        // [6]
-    const float* __restrict__ tool_error,       // [7]
-    const float* __restrict__ pad_error,        // [3]
-    int N, float decay_factor, float gain,
-    float w_mod, float w_tool, float w_pad)
-{
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= N) return;
-
-    const float* mod_row = readout_weights + (size_t)i * 6;
-    float backprop_signal = 0.0f;
-    #pragma unroll
-    for (int m = 0; m < 6; ++m) {
-        backprop_signal += w_mod * mod_row[m] * mod_error[m];
-    }
-    const float* tool_row = tool_weights + (size_t)i * CURRICULUM_N_TOOL;
-    #pragma unroll
-    for (int t = 0; t < CURRICULUM_N_TOOL; ++t) {
-        backprop_signal += w_tool * tool_row[t] * tool_error[t];
-    }
-    if (w_pad != 0.0f) {
-        const float* pad_row = pad_weights + (size_t)i * 3;
-        #pragma unroll
-        for (int p = 0; p < 3; ++p) {
-            backprop_signal += w_pad * pad_row[p] * pad_error[p];
-        }
-    }
-    if (!isfinite(backprop_signal)) backprop_signal = 0.0f;
-
-    float old_val = neuron_eligibility[i];
-    float new_val = decay_factor * old_val - gain * backprop_signal;
-    if (new_val > 1.0f)  new_val = 1.0f;
-    if (new_val < -1.0f) new_val = -1.0f;
-    neuron_eligibility[i] = new_val;
-}
-
-void launch_curriculum_eligibility_update(PersistentBuffers& buf,
-                                          float decay_factor, float gain,
-                                          float w_mod, float w_tool, float w_pad)
-{
-    if (!buf.d_neuron_eligibility || !buf.d_curriculum_readout_weights
-        || !buf.d_curriculum_tool_weights
-        || !buf.d_curriculum_error || !buf.d_curriculum_tool_error) return;
-    // PAD 缓冲缺失时降级: w_pad=0 (Kernel 内 PAD 块跳过, 不触碰空指针)
-    const bool has_pad = buf.d_curriculum_pad_weights && buf.d_curriculum_pad_error;
-    int blocks = (N_TOTAL_NEURONS_2E + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
-    curriculum_eligibility_update_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
-        buf.d_neuron_eligibility,
-        buf.d_curriculum_readout_weights,
-        buf.d_curriculum_tool_weights,
-        has_pad ? buf.d_curriculum_pad_weights : nullptr,
-        buf.d_curriculum_error,
-        buf.d_curriculum_tool_error,
-        has_pad ? buf.d_curriculum_pad_error : nullptr,
-        N_TOTAL_NEURONS_2E, decay_factor, gain,
-        w_mod, w_tool, has_pad ? w_pad : 0.0f);
     CUDA_CHECK_LAST_2E();
 }
 

@@ -279,6 +279,14 @@ std::vector<Section> SchedulerCheckpointAccess::make_sections(
     // 只重初始化 PAD 头, 不触碰已加载的 mod/tool readout 权重)
     add(&s, "curriculum_pad_readout", b.d_curriculum_pad_weights,
         (uint64_t)N_TOTAL_NEURONS_2E * 3, sizeof(float));
+    // B4 修复 (2026-08-04): PCA 均值 GPU 镜像持久化 — 原实现只存 d_pca_W,
+    //   resume 后 d_pca_mean_ 为构造期零值, h_mean_fr_ (零) 同步覆盖 GPU 均值,
+    //   均值流形丢失. 放节表末尾保证旧 checkpoint 前缀兼容 (缺失即零, 与
+    //   h_mean_fr_ 构造初值一致).
+    add(&s, "pca_mean", self->d_pca_mean_, N_ASSOCIATION_NEURONS_2E, sizeof(float));
+    // 2026-08-04 方案2: 浓度 readout 头权重 (6×6×4B = 144 B)
+    //   放节表最末尾, 旧 checkpoint 缺失时 load 端随机初始化 (小值, 与训练初始一致)
+    add(&s, "curriculum_conc_readout", b.d_curriculum_conc_weights, 6 * 6, sizeof(float));
     return s;
 }
 
@@ -648,8 +656,9 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
         std::fclose(fp);
         return 6;
     }
-    if (state.corpus_size != text_corpus_size() ||
-        state.corpus_fingerprint != text_corpus_fingerprint()) {
+    if (!skip_corpus_check &&
+        (state.corpus_size != text_corpus_size() ||
+         state.corpus_fingerprint != text_corpus_fingerprint())) {
         std::fclose(fp);
         std::fprintf(stderr, "[Checkpoint] corpus does not match checkpoint\n");
         return 8;
@@ -702,6 +711,10 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
             //   会重随机化已加载的 mod/tool 权重 → 必须用 PAD-only init
             launch_curriculum_pad_readout_init(pb, 0.01f, 42u);
             std::printf("[Checkpoint] 警告: curriculum_pad_readout 未找到, 用随机小值初始化 (仅 PAD 头)\n");
+        } else if (name == "curriculum_conc_readout") {
+            // 2026-08-04 方案2: 只初始化浓度头 (6×6), 不触碰 mod/tool/pad 权重
+            launch_curriculum_conc_readout_init(pb, 0.01f, 42u);
+            std::printf("[Checkpoint] 警告: curriculum_conc_readout 未找到, 用随机小值初始化 (仅浓度头)\n");
         }
     }
     std::fclose(fp);
@@ -711,6 +724,27 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
         return 10;
     }
     set_e0_ablation(e0_ablation);
+
+    // B4 修复 (2026-08-04): resume 后同步 GPU PCA 基矩阵/均值回 CPU 镜像
+    //   根因: h_pca_W_/h_mean_fr_ 是 CPU 端 Oja 镜像 (构造时随机/零值), 不随
+    //   checkpoint 恢复; 下一 PCA_SYNC_INTERVAL 周期 (launch_pca_update_cpu)
+    //   会用随机/零镜像覆盖 GPU d_pca_W → PCA 流形破坏 (签名/海马/WM 检索).
+    //   恢复后立即 D2H 回填镜像, 与 GPU 保持一致. 旧 checkpoint 缺 pca_mean
+    //   节时 d_pca_mean_ 保持构造期零值, 回填 h_mean_fr_ 也为零, 行为一致.
+    if (d_pca_mean_ && !h_pca_W_.empty() && !h_mean_fr_.empty() && pb.d_pca_W) {
+        const size_t pca_w_bytes =
+            (size_t)N_ASSOCIATION_NEURONS_2E * PCA_N_COMPONENTS * sizeof(float);
+        const cudaError_t err_w = cudaMemcpy(h_pca_W_.data(), pb.d_pca_W,
+                                             pca_w_bytes, cudaMemcpyDeviceToHost);
+        const cudaError_t err_m = cudaMemcpy(h_mean_fr_.data(), d_pca_mean_,
+                                             (size_t)N_ASSOCIATION_NEURONS_2E * sizeof(float),
+                                             cudaMemcpyDeviceToHost);
+        if (err_w != cudaSuccess || err_m != cudaSuccess) {
+            std::fprintf(stderr, "[Checkpoint] PCA 镜像回填失败: %s / %s\n",
+                         cudaGetErrorString(err_w), cudaGetErrorString(err_m));
+            return 11;
+        }
+    }
     *next_step = state.next_step;
     *topology_seed = state.topology_seed;
     // Loaded checkpoints contain eager traces materialized after the previous

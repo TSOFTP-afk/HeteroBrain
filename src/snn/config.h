@@ -1,6 +1,9 @@
 #ifndef SNN_STAGE2E_CONFIG_H
 #define SNN_STAGE2E_CONFIG_H
 
+// 2026-08-05 编译诊断标记: 验证 nvcc 读取的 config.h 是否为本磁盘文件
+#define CONFIG_MARKER_20260805 1
+
 // =============================================================================
 // Stage 2e: 多层级生物机制增强方案 v4
 // =============================================================================
@@ -288,10 +291,6 @@ static_assert(COL_L4_SIZE_2E + COL_L23_SIZE_2E + COL_L5_SIZE_2E + COL_L6_SIZE_2E
 //   60K 启蒙课程测试: β 从 0.07 爆增到 82 (平衡点 ~183), 91.7% 突触 conf≈0 权重塌缩
 //   等比缩放 α,β 保留比例 (conf=α/(α+β) 不变, 权重连续); 非课程平衡 0.48 远低于此 → 零回归
 #define PSW_EVIDENCE_MAX            5.0f
-// 2026-08-02: 课程 eligibility 注入增益 (归一化到解码路径量级)
-//   原 0.1: n_elig ≈ 2×signal ≈ 0.6 vs 解码 0.005 → 120 倍失配, β 失控主因
-//   新 8e-4: n_elig ≈ 20.5×8e-4×0.5 ≈ 0.008, 与解码同量级; 0.1/127 ≈ 8e-4
-#define CURRICULUM_ELIGIBILITY_GAIN 8e-4f
 // 成熟度阈值: (α+β) > PSW_MATURITY_THRESH 视为已学习稳定突触
 // 设为 0.2 = 初始证据 0.1 的 2 倍, STDP 累积 0.1 证据即视为"开始学习"
 #define PSW_MATURITY_THRESH       0.2f

@@ -36,6 +36,10 @@ struct RunConfig {
     float bptt_surrogate_alpha = 4.0f;  // 代理梯度 sigmoid 斜率
     std::string input_mode = "bpe";     // 输入模式: "bpe" (默认) 或 "byte"
     std::string bpe_data_path;          // BPE 数据文件路径 (.bin)
+    // 2026-08-05: 文本流注入间隔 (原编译宏 INPUT_INJECT_INTERVAL=3)
+    //   默认 3 (与历史实验一致); 长线剧本模式建议 1 (每段 400 步注入 400 字节
+    //   ≈ 每段 110 字叙事 330 字节, 事件与文本流时间同步)
+    int  input_inject_interval = 3;     // --input-inject-interval N (1-10)
     // ==================== Phase 3a-C1: 事件驱动调质注入 ====================
     bool event_stream_enabled = false;
     std::string event_stream_path;      // --event-stream PATH
@@ -50,6 +54,12 @@ struct RunConfig {
     int  curriculum_eval_samples = 100; // --curriculum-eval-samples N 评估样本数
                                         //   2026-08-01 spec §7.3: 默认 20 → 100
                                         //   (20 样本统计意义不足: 12 个 target=6 全对即可达 60% 准确率)
+    bool curriculum_continuous = false; // --curriculum-continuous 连续课程模式
+                                        //   窗口边界不复位浓度模拟器 → 前序窗口慢通道残留
+                                        //   (Oxy tau=500) 传导到后续窗口, target 含远程因果影响;
+                                        //   配套 generate_serial_curriculum.py 连续叙事数据
+                                        //   (2026-08-05 新增, 与 2026-08-04 P0 修复不冲突:
+                                        //   冷启动仍为默认, 连续模式为显式受控延续)
     std::string learning_rule = "bptt"; // --learning-rule bptt|n3f (默认 bptt)
                                         //   bptt: 窗口重放反传 (Phase 3a-D3 现行)
                                         //   n3f : 调质门控三因子在线学习 (Neuromodulator-Gated

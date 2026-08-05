@@ -49,10 +49,21 @@ size_t text_corpus_size();
 // 获取文本缓冲指定位置的字节 (越界返回 0)
 uint8_t get_text_byte_at(size_t idx);
 
+// 2026-08-05: 设置文本流注入间隔 (原编译宏 INPUT_INJECT_INTERVAL=3)
+//   main.cpp 启动时调用 (默认 3; 长线剧本模式建议 1 使文本流与窗口事件同步)
+void set_input_inject_interval(int interval);
+
 // Checkpoint/resume uses the logical corpus cursor, not a raw host pointer.
 size_t text_stream_position();
 bool set_text_stream_position(size_t position);
 uint64_t text_corpus_fingerprint();
+
+// 把外部文本 (对话内容) 追加到文本流尾部 (2026-08-05, 引擎对话模式用)。
+// 追加后 get_byte_for_step 循环读取时可能读到新内容 → WM/Hippo 记忆系统
+// 会编码对话内容的神经签名 (SNN 真正"看见"对话)。
+// 过滤语义与 load_text_corpus 一致: \r\n\t → 空格; 不影响已算好的指纹 (resume 后调用)。
+// 返回追加后的文本流总字节数。
+size_t append_text_stream(const char* bytes, size_t n);
 
 // =============================================================================
 // BPE Token Stream Mode (Task C1)

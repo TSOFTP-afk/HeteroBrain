@@ -164,6 +164,11 @@ struct PersistentBuffers {
     // 课程窗口累计 spike 平均发放率 [N] (事件调质在窗口内逐帧调制发放,
     // 累计率比最后一帧更能编码事件类型 → 工具 readout 的输入特征)
     float*             d_curriculum_accum_spikes = nullptr;     // [N] 窗口累计/窗口长
+    // 2026-08-04 方案2: 浓度 readout 头 [6×6] — 网络调质浓度 (6 维, 随事件变化)
+    //   直接作 readout 输入特征, 与 spike 头输出并联:
+    //   logits[m] = Σ_i W_mod[i*6+m]·rate[i] + Σ_j W_conc[m*6+j]·conc[j]
+    //   修复"事件→浓度变化但 spike 发放率不变"的设计断链 (浓度不注入电流)
+    float*             d_curriculum_conc_weights = nullptr;     // [6×6] 浓度→调质 readout
     // 2026-08-01 spec §7.9 修复: 消除 launch_curriculum_error 的静态懒分配
     //   (多流/多 GPU 场景不可重入, 且与 PersistentBuffers 生命周期管理分离)
     float*             d_curriculum_target = nullptr;          // [9] 目标缓冲: [0..6) 调质 + [6..9) PAD (H2D 拷贝缓冲)

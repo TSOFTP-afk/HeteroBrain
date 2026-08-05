@@ -25,8 +25,8 @@
 #include <cstdio>
 #include <cstring>
 #include <cmath>
-#include <vector>
 #include <algorithm>
+#include <vector>
 #include <limits>
 #include <random>
 #include <cuda_runtime.h>
@@ -47,10 +47,8 @@ static inline double js_divergence(const double* P, const double* Q, int dim) {
 }
 
 // P1 占位 kernel: 简单清零 (用于未实现的慢时间尺度机制)
-__global__ void p1_noop_clear_float(float* d, int n) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) d[i] = 0.0f;
-}
+// (2026-08-04 B1 修复: p1_noop_clear_float 唯一调用点 — 每步清零
+//  d_inhibitory_current — 已移除, 本 kernel 无使用方, 删除)
 
 // Task 2: spike_flags (bool) → 发放率 (float) 转换, 供 PCA 签名提取用
 // 联合皮层前 N_ASSOCIATION_NEURONS_2E 个神经元的瞬时发放 (0/1) 转为 float
@@ -495,7 +493,7 @@ void BioMechanismScheduler::step(int current_step) {
     }
     // 计算当前步是否为注入步 + 当前字节 (门控更新需要)
     uint8_t current_byte = 0;
-    bool is_inject_step = (current_step % INPUT_INJECT_INTERVAL == 0);
+    bool is_inject_step = (current_step % input_inject_interval == 0);
     if (is_inject_step) {
         current_byte = get_byte_for_step(current_step);
     }
@@ -506,7 +504,7 @@ void BioMechanismScheduler::step(int current_step) {
                                  current_byte, is_inject_step,
                                  d_byte_history_, d_gate_stats_);
 
-    // 2. 群体编码输入注入 (每 INPUT_INJECT_INTERVAL 步注入一个字节)
+    // 2. 群体编码输入注入 (每 input_inject_interval 步注入一个字节)
     // 门控调制增益: 传入 d_gate_states_ 数组, kernel 内部读取 .gate_signal 字段
     // (ThalamicGateState 是 16B 结构体, gate_signal 在 offset 0, 但相邻柱间隔 16B
     //  故不能用 float* 强转索引, 必须通过结构体字段访问)
@@ -554,8 +552,12 @@ void BioMechanismScheduler::step(int current_step) {
     launch_synapse_nmda(alloc_, current_step, arrived_ring_idx, arrived_count);
 
     // 5. STDP 双 trace + Δw (pre 侧由延迟到达事件驱动)
-    launch_stdp_dual_trace(alloc_, current_step, phase.plasticity_gain,
-                           arrived_ring_idx, arrived_count, stdp_eta_multiplier_);
+    //    B3 修复 (2026-08-04): 评估冻结时跳过 STDP — 防止 α/β 累积 + weight
+    //    重算在 eval 期间持续修改突触权重 (评估样本间漂移, eval 非严格冻结)
+    if (!weights_freeze_) {
+        launch_stdp_dual_trace(alloc_, current_step, phase.plasticity_gain,
+                               arrived_ring_idx, arrived_count, stdp_eta_multiplier_);
+    }
 
     // 6. STP 短期可塑性 (由延迟到达事件驱动)
     launch_stdp_stp(alloc_, current_step, arrived_ring_idx, arrived_count);
@@ -563,10 +565,14 @@ void BioMechanismScheduler::step(int current_step) {
     // 7. 延迟队列分发 (扫描 spike_flags, 写入 ring[target_ring])
     launch_delay_dispatch(alloc_, current_step, delay_ring_idx_);
 
-    // 8. 抑制性电流清零 (P1: 抑制性网络未实现, 保持 0)
-    int blocks = (N_TOTAL_NEURONS_2E + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
-    p1_noop_clear_float<<<blocks, THREADS_PER_BLOCK_2E>>>(
-        buf.d_inhibitory_current, N_TOTAL_NEURONS_2E);
+    // 8. 抑制性电流 — 2026-08-04 B1 修复: 移除每步清零
+    //   原实现每步把 d_inhibitory_current 清零, 而写入 (launch_inhibitory_network,
+    //   %10 块) 每 10 步才执行一次 → 竞争/门控信号每 10 步仅生效 1 步,
+    //   9/10 步抑制电流为 0, P3 稀疏竞争 (判据 [17][18]) 实际几乎失效
+    //   (判据只统计 inhib_updates 计数故"通过", 未测真实竞争效果).
+    //   修复: 移除每步清零, 竞争 kernel 全量覆写 (p3_inhibitory_competition_kernel
+    //   无条件写全部条目), 值在两次 %10 更新之间持续生效; 步 0 前缓冲由
+    //   network_init 零初始化.
 
     // 9. Task 7: L5 → 运动皮层突触传递 + 运动皮层 AdEx 更新
     //    - 主网络 spike_flags 已由 step 3 (lif_adex) 写入, 可作为 L5 突触前信号源
@@ -581,7 +587,10 @@ void BioMechanismScheduler::step(int current_step) {
     // P2 实现: camkii, eligibility, inhibitory_network
     // E0 消融模式: 跳过 CaMKII 和 eligibility (保留 inhibitory 占位)
     if (current_step % 10 == 0) {
-        if (!e0_ablation) {
+        // B3 修复 (2026-08-04): 评估冻结时跳过 CaMKII — camkii_autophosph 经
+        //   plasticity_factor 调制 STDP 证据 (间接改权重); 抑制性网络属网络
+        //   动力学非权重, 评估期间保留
+        if (!e0_ablation && !weights_freeze_) {
             launch_camkii_eligibility(alloc_, current_step);
         }
         launch_inhibitory_network(current_step);
@@ -614,14 +623,19 @@ void BioMechanismScheduler::step(int current_step) {
                                   COACT_STALE_THRESHOLD);
     }
 
-    // ==================== 慢时间尺度 (每 100 步) ====================
+    // ==================== 慢时间尺度 (每 mod_update_interval 步) ====================
     // P2 实现: modulatory, scaling, wm_update
     // E0 消融模式: 跳过 modulatory 和 scaling (纯 STDP 不含调质和缩放)
     // Task 18: 睡眠态跳过 modulatory (ACh/DA 刷新), 让 ACh 保持低水平巩固模式
-    if (current_step % 100 == 0) {
+    // 2026-08-05 引擎接线: mod_update_interval 可配置 (默认 100, 引擎对话模式可降为 10)
+    if (current_step % mod_update_interval == 0) {
         if (!e0_ablation && !is_sleeping_) {
             launch_modulatory(current_step);
-            launch_scaling(current_step);
+            // B3 修复 (2026-08-04): 评估冻结时跳过 scaling (当前为 PSW 空壳,
+            //   但语义上属权重写入, 统一在冻结时跳过)
+            if (!weights_freeze_) {
+                launch_scaling(current_step);
+            }
             // Phase 3a: 用 get_affective_state 替代 get_modulatory_stats
             //   一次性获取 6 维调质均值 + PAD 情感模型 + LLM 调制信号
             //   内部已调用 get_modulatory_stats, 无额外开销
@@ -687,7 +701,11 @@ void BioMechanismScheduler::step(int current_step) {
     // ==================== 极慢时间尺度 (每 1000 步) ====================
     // P1 占位 (Phase 4 实现): structural_plasticity, developmental
     if (current_step % 1000 == 0) {
-        launch_structural_plasticity(current_step);
+        // B3 修复 (2026-08-04): 评估冻结时跳过结构可塑性 — 证据衰减 (α/β×0.95)
+        //   + 弱突触重置 + 共激活重建都会改突触权重/拓扑, eval 期间必须冻结
+        if (!weights_freeze_) {
+            launch_structural_plasticity(current_step);
+        }
         launch_developmental(current_step);
         // L6 host totals are diagnostic-only and printed every 1000 steps.
         // Avoid forcing a 200-byte device-to-host synchronization every step.
@@ -716,7 +734,7 @@ void BioMechanismScheduler::step(int current_step) {
     }
 
     // ==================== 睡眠重放 (每 10000 步) ====================
-    if (current_step % 10000 == 0) {
+    if (!skip_replay && current_step % 10000 == 0) {
         launch_replay(current_step);
         // P3-C: 同周期触发语义聚类评估 (silhouette + JS + 柱间差异)
         launch_semantic_eval(current_step);
@@ -744,6 +762,8 @@ void BioMechanismScheduler::step(int current_step) {
 
     // ==================== 统计 ====================
     // 统计当前步 spike 数 (用于 P1 判据)
+    // (2026-08-04 B1 修复后 blocks 声明移至此使用处 — 原声明随每步清零块删除)
+    int blocks = (N_TOTAL_NEURONS_2E + THREADS_PER_BLOCK_2E - 1) / THREADS_PER_BLOCK_2E;
     count_spikes_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
         buf.d_spike_flags, N_TOTAL_NEURONS_2E, d_spike_counter_);
 
@@ -775,10 +795,10 @@ void BioMechanismScheduler::step(int current_step) {
     //   改: 排除注入步, 只在非注入步 (网络自主活动) 中统计 burst
     //       非注入步 spike 高于其平均的 1.5 倍 = 网络级联自发活动
     //       (2× 太严格, 实测仅 0.2% burst; 1.5× 实测 ~2% burst)
-    is_inject_step = (current_step % INPUT_INJECT_INTERVAL == 0);
+    is_inject_step = (current_step % input_inject_interval == 0);
     if (!is_inject_step) {
         // 用非注入步的滑动平均作基准
-        int non_inject_steps = total_steps_ - (total_steps_ + INPUT_INJECT_INTERVAL - 1) / INPUT_INJECT_INTERVAL;
+        int non_inject_steps = total_steps_ - (total_steps_ + input_inject_interval - 1) / input_inject_interval;
         if (non_inject_steps > 5) {  // 至少 5 个非注入步才计算平均
             int non_inject_avg = (total_spikes_accum_ - inject_spikes_accum_) / non_inject_steps;
             if (step_spikes > (non_inject_avg * 3) / 2 && non_inject_avg > 0) {
@@ -894,7 +914,8 @@ void BioMechanismScheduler::launch_modulatory(int step) {
         curriculum_baseline_active_ ? curriculum_baseline_mod_ : nullptr;
     ::stage2e::launch_modulatory(alloc_, step, reward, novelty, pred_succ, kl_div, da_delta,
                                   prediction_error_norm, 0.0f, stage_baseline,
-                                  curriculum_baseline_active_);
+                                  curriculum_baseline_active_,
+                                  mod_update_interval);
 }
 
 void BioMechanismScheduler::launch_scaling(int step) {
@@ -1129,9 +1150,9 @@ void BioMechanismScheduler::launch_semantic_eval(int step) {
     // =====================================================================
     {
         // 最近一次注入步 (eval 步之前的最后一次 inject)
-        // inject 步: step % INPUT_INJECT_INTERVAL == 0, 即 step = k * INPUT_INJECT_INTERVAL
-        // 最近一次 = floor((step - 1) / INPUT_INJECT_INTERVAL) * INPUT_INJECT_INTERVAL
-        int last_inject_step = ((step - 1) / INPUT_INJECT_INTERVAL) * INPUT_INJECT_INTERVAL;
+        // inject 步: step % input_inject_interval == 0, 即 step = k * input_inject_interval
+        // 最近一次 = floor((step - 1) / input_inject_interval) * input_inject_interval
+        int last_inject_step = ((step - 1) / input_inject_interval) * input_inject_interval;
         if (last_inject_step < 0) last_inject_step = 0;
 
         // 拷贝 neurons 到 host (55K × 56B = 3.08MB, eval 频率 1/10000 步可接受)
@@ -1166,9 +1187,9 @@ void BioMechanismScheduler::launch_semantic_eval(int step) {
     // 期望: L4 (丘脑输入) 应有更高字节选择性 (更高 sig_ratio)
     // =====================================================================
     {
-        // 注入分布: 字节均匀循环注入 (每 INPUT_INJECT_INTERVAL 步一个新字节, 256 字节循环)
+        // 注入分布: 字节均匀循环注入 (每 input_inject_interval 步一个新字节, 256 字节循环)
         // 故每字节注入次数相等, expected_proportion = 1/256 (已在构造函数初始化)
-        // 若 step < 256 * INPUT_INJECT_INTERVAL, 实际注入次数可能不均, 但作为监控指标足够
+        // 若 step < 256 * input_inject_interval, 实际注入次数可能不均, 但作为监控指标足够
         // (main.cpp 末尾会做精确的 per-byte 注入次数分析)
 
         // 清零统计缓冲
@@ -1271,6 +1292,12 @@ void BioMechanismScheduler::launch_structural_plasticity(int step) {
                                           sizeof(int), cudaMemcpyDeviceToHost));
                 CUDA_CHECK_2E(cudaMemcpy(&prune_count, d_prune_count_,
                                           sizeof(int), cudaMemcpyDeviceToHost));
+                // 2026-08-05 修复: structural_rebuild_kernel 的 atomicAdd 无条件推进
+                //   计数 (候选总数可能 > max_new), 但 d_new_synapse_pairs 只写前 max_new
+                //   个 → new_count 必须 clamp, 否则后续 host memcpy/循环按超限大小访问
+                //   越界 → cudaMemcpyAsync invalid argument (长线训练 40K 步崩溃).
+                //   (clamp 后与 kernel 实际写入数一致, 日志 new=上限值)
+                if (new_count > COACT_MAX_NEW_SYNAPSES) new_count = COACT_MAX_NEW_SYNAPSES;
 
                 // 读取当前突触总数
                 int n_synapses_total = 0;
@@ -1524,6 +1551,112 @@ void BioMechanismScheduler::pca_back_project(const float* d_signature,
                             d_reconstructed_out, N, K);
 }
 
+// 从 PCA 签名解码字节概率分布 (host 端, 二期: SNN 记忆内容解码)
+int BioMechanismScheduler::decode_signature_top_bytes(const float* sig50,
+                                                      uint8_t* out_bytes,
+                                                      float* out_probs, int k) {
+    if (!sig50 || !out_bytes || !out_probs || k <= 0) {
+        return 0;
+    }
+    const int N_PCA = N_ASSOCIATION_NEURONS_2E;   // 50000 联合皮层
+    const int K_PCA = PCA_N_COMPONENTS;           // 50
+    const int N_DEC = N_TOTAL_NEURONS_2E;         // 60000 全网络
+    if (h_pca_W_.empty() || h_mean_fr_.empty()) {
+        return 0;
+    }
+    const int n_w = std::min<int>(N_PCA, (int)h_pca_W_.size() / K_PCA);
+    if (n_w <= 0 || (int)h_mean_fr_.size() < n_w) {
+        return 0;
+    }
+
+    // 懒加载解码器权重 host 镜像 (60000×256×4B ≈ 61MB, 一次性)
+    if (!h_decode_weights_loaded_) {
+        PersistentBuffers& buf = alloc_->buffers();
+        if (!buf.d_decode_weights) {
+            return 0;
+        }
+        h_decode_weights_.resize((size_t)N_DEC * 256);
+        if (cudaMemcpy(h_decode_weights_.data(), buf.d_decode_weights,
+                       h_decode_weights_.size() * sizeof(float),
+                       cudaMemcpyDeviceToHost) != cudaSuccess) {
+            h_decode_weights_.clear();
+            return 0;
+        }
+        h_decode_weights_loaded_ = true;
+    }
+
+    // 1. PCA 反投影 → 联合皮层发放率 (rate = mean + Σ sig·W, 非负)
+    //    数值修正 (2026-08-05 实测): 训练侧 PCA W 范数巨大 (W_norm~1e8) →
+    //    反投影 rate 数值爆炸 → logits 饱和成单点。对 rate 做 min-max 归一化
+    //    到 [0,1], 保留相对活动模式 (解码输出反映"模式", 而非绝对数值)。
+    std::vector<float> rate((size_t)N_DEC, 0.0f);
+    for (int i = 0; i < n_w; ++i) {
+        float r = h_mean_fr_[i];
+        const float* wrow = h_pca_W_.data() + (size_t)i * K_PCA;
+        for (int kk = 0; kk < K_PCA; ++kk) {
+            r += sig50[kk] * wrow[kk];
+        }
+        rate[i] = r > 0.0f ? r : 0.0f;
+    }
+    {
+        float rmin = rate[0], rmax = rate[0];
+        for (int i = 1; i < n_w; ++i) {
+            if (rate[i] < rmin) rmin = rate[i];
+            if (rate[i] > rmax) rmax = rate[i];
+        }
+        if (rmax > rmin) {
+            for (int i = 0; i < n_w; ++i) {
+                rate[i] = (rate[i] - rmin) / (rmax - rmin);
+            }
+        }
+    }
+
+    // 2. logits[b] = Σ_i W_decode[i*256+b]·rate[i]
+    float logits[256];
+    for (int b = 0; b < 256; ++b) {
+        float acc = 0.0f;
+        const float* col = h_decode_weights_.data() + b;   // 列步长 256
+        for (int i = 0; i < N_DEC; ++i) {
+            acc += col[(size_t)i * 256] * rate[i];
+        }
+        logits[b] = acc;
+    }
+
+    // 3. softmax (数值稳定 + 温度平滑)
+    //    解码器 logits 尺度大, 直接 softmax 会饱和成 100% 单点假象 (实测 0xE6=100%);
+    //    除以温度使分布平滑, top-k 概率才有信息量 (不改变排序)
+    const float kTemp = 8.0f;
+    float mx = logits[0];
+    for (int b = 1; b < 256; ++b) {
+        if (logits[b] > mx) mx = logits[b];
+    }
+    double sum = 0.0;
+    for (int b = 0; b < 256; ++b) {
+        sum += std::exp((double)((logits[b] - mx) / kTemp));
+    }
+    if (!(sum > 0.0)) {
+        return 0;
+    }
+    for (int b = 0; b < 256; ++b) {
+        logits[b] = (float)(std::exp((double)((logits[b] - mx) / kTemp)) / sum);
+    }
+
+    // 4. top-k 字节
+    const int got = k < 256 ? k : 256;
+    for (int j = 0; j < got; ++j) {
+        int best = 0;
+        for (int b = 1; b < 256; ++b) {
+            if (logits[b] > logits[best]) {
+                best = b;
+            }
+        }
+        out_bytes[j] = (uint8_t)best;
+        out_probs[j] = logits[best];
+        logits[best] = -1.0f;
+    }
+    return got;
+}
+
 // ==================== Task 4-5: 在线解码 step 实现 ====================
 // 流程:
 //   1. 每步: launch_decode_forward (前向 + softmax + argmax) → 拷贝 predicted_byte 到 host
@@ -1574,7 +1707,10 @@ void BioMechanismScheduler::decode_step(uint8_t current_input_byte,
             // 在权重更新之前调用, 让 STDP kernel 下一步能读取到最新的 neuron_eligibility
             // N3F 课程模式: 禁用 decode eligibility, 避免字节预测教学信号
             // 与课程教学信号 (n3f_online_step) 竞争同一 d_neuron_eligibility 缓冲
-            if (!n3f_mode()) {
+            // B5 修复 (2026-08-04): 课程模式 (含 BPTT 课程) 一律禁用 —
+            //   范式切换后课程 eligibility 注入已删, decode 信号不得再写共享
+            //   缓冲干扰课程 STDP 证据 (spec §7.2 突触塑形回归 STDP)
+            if (!n3f_mode() && !curriculum_mode_) {
                 launch_decode_eligibility_update(buf);
             }
 
@@ -1720,14 +1856,11 @@ void BioMechanismScheduler::bptt_step(int current_step, uint8_t current_byte, in
             return;
         }
 
-        // 3. 反向: 三路误差合并注入最终步梯度, 复用反向循环
-        //    (注: backward_curriculum 为 bptt_trainer 方法, 签名固定 (w_mod, w_tool);
-        //    PAD 项经 launch_curriculum_backprop 的 w_pad 默认 0 数学上无贡献 —
-        //    仅 N3F eligibility 路径携带 PAD 网络梯度, BPTT 路径 PAD 只训 readout 头)
-        bptt_trainer_->backward_curriculum(buf, curriculum_w_mod_, curriculum_w_tool_);
-        // 4. 突触权重更新 (SGD + 裁剪)
-        bptt_trainer_->update(buf, current_step);
-        // 5. readout 权重更新 (调质 + PAD + 工具)
+        // 3. (范式切换, B2, 2026-08-04): BPTT 课程模式只训 readout 头 —
+        //    跳过 backward_curriculum + update: BPTT 梯度直接写 weight 会被
+        //    STDP w=W_MAX·α/(α+β) 重算覆盖 (B2, 突触级训练名存实亡);
+        //    按 spec §7.2 突触塑形回归 STDP, BPTT 仅负责 readout 监督
+        // 4. readout 权重更新 (调质 + PAD + 工具)
         launch_curriculum_readout_update(buf, curriculum_readout_lr_,
                                          curriculum_w_mod_, curriculum_w_tool_,
                                          curriculum_w_pad_);
@@ -1831,20 +1964,28 @@ void BioMechanismScheduler::advance_curriculum_target(const CurriculumSample* sa
     pad_from_concentration(conc, curriculum_target_pad_curr_);
 }
 
+// 2026-08-04 修复: 复位浓度模拟器到冷启动 (conc=0, sensitivity=1)
+//   原实现跨样本/窗口持续运行不重置 → 慢通道 (Oxy tau=500 > 窗口 400) 残留累积,
+//   目标漂移到稳态不动点; 修复后每个样本/窗口从冷启动出发, 窗口内事件注入驱动
+//   目标响应, 调质 MSE 度量真实的"事件→调质响应"预测误差.
+//   首个 advance (rel=0, 无事件) 会注入阶段基线 → 窗口起点目标 = baseline.
+void BioMechanismScheduler::reset_curriculum_target() {
+    curriculum_mod_sim_.reset();
+    const float* conc = curriculum_mod_sim_.conc();
+    for (int i = 0; i < 6; ++i) curriculum_target_mod_curr_[i] = conc[i];
+    pad_from_concentration(conc, curriculum_target_pad_curr_);
+}
+
 // -----------------------------------------------------------------------------
-// N3F: 调质门控三因子在线学习 — 每步教学信号注入
+// N3F: 调质门控三因子在线学习 — readout 监督 (每步教学信号注入 readout 前向)
 //   1. readout 前向 (当前帧 spike): 调质 6 维 + 工具 7 类 logits
 //   2. 课程误差: mod_error[6] (MSE) + tool_error[7] (CE) + 总 loss
-//   3. 教学信号 → 神经元级 eligibility (事件门控, spec §7.1 恢复 2026-08-02):
-//        elig[i] = λ·elig[i] - g·(Σ_m w_mod·W_mod[i,m]·err_mod[m]
-//                               + Σ_t w_tool·W_tool[i,t]·err_tool[t])
-//     allow_elig_inject=true (窗口内事件已注入) 时才注入; 事件前不注入,
-//     消除教学目标与事件注入时序失配造成的虚假误差 (§7.1 P0 缺陷).
-//     STDP kernel (下次 scheduler.step 内) 读取 elig[post] 调制突触证据,
-//     实现三因子闭环: pre·post (STDP trace) × 教学信号 → 突触结构/权重演化。
+//   范式切换 (B5, 2026-08-04): 不再注入课程教学信号到神经元级 eligibility —
+//   spec §7.2 "突触塑形回归 STDP + 沙盒反馈", readout 仍是监督头,
+//   突触学习由纯 STDP (pre·post) + 具身沙盒反馈 (n3f_embodied_step) 驱动.
 //   与 BPTT 的本质区别: 无窗口重放、无历史缓冲、无全局反传, 每步局部在线。
 // -----------------------------------------------------------------------------
-void BioMechanismScheduler::n3f_online_step(int current_step, bool allow_elig_inject) {
+void BioMechanismScheduler::n3f_online_step(int current_step) {
     if (!curriculum_mode_) return;
     PersistentBuffers& buf = alloc_->buffers();
     if (!buf.d_curriculum_readout_weights || !buf.d_curriculum_tool_weights) return;
@@ -1874,23 +2015,12 @@ void BioMechanismScheduler::n3f_online_step(int current_step, bool allow_elig_in
                             curriculum_w_mod_, curriculum_w_tool_, curriculum_w_pad_,
                             p_loss);
 
-    // 3. 教学信号 → 神经元级 eligibility (事件门控, 2026-08-02 恢复)
-    //    allow_elig_inject=true 仅当窗口内课程事件已注入 (main.cpp 事件注入
-    //    循环 evt.step_offset == rel 置位); 事件前不注入, 消除 §7.1 虚假误差
-    //    (网络未看到事件却被要求预测事件后的调质状态 → 污染突触学习)
-    //    事件注入后本步立即注入 eligibility → 下次 STDP 读取, 教学信号恢复
-    //    decay/gain 与 n3f_embodied_step 同尺度 (τ=20, 课程增益 g=0.1 §3)
-    //    backprop_signal 含 PAD 项: Σ_p w_pad·W_pad[i,p]·err_pad[p] (Task 6)
-    if (allow_elig_inject) {
-        const float decay = expf(-1.0f / NEURON_ELIB_TAU);
-        // 2026-08-02: 课程 eligibility 增益归一化 (fix-curriculum-beta-runaway)
-        //   原 0.1 → n_elig ≈ 0.6, 比解码路径 (≈0.005) 大 120 倍 → β 证据失控
-        //   新 CURRICULUM_ELIGIBILITY_GAIN=8e-4 → n_elig ≈ 0.008, 与解码同量级
-        const float gain = CURRICULUM_ELIGIBILITY_GAIN;
-        launch_curriculum_eligibility_update(buf, decay, gain,
-                                             curriculum_w_mod_, curriculum_w_tool_,
-                                             curriculum_w_pad_);
-    }
+    // 3. (范式切换, B5, 2026-08-04): 不再注入课程教学信号到神经元级 eligibility —
+    //    spec §7.2 决定"突触塑形回归 STDP + 沙盒反馈". 删除课程 eligibility 注入:
+    //    ① 消除与 decode/具身共享 d_neuron_eligibility 缓冲的相互覆盖 (B5);
+    //    ② 消除跨窗口教学信号残留 (P1-4, 注入删除后残留问题自然消失);
+    //    ③ readout 训练 (上方误差) 仍保留; 突触学习走纯 STDP (pre·post)
+    //       及具身沙盒反馈 (n3f_embodied_step).
 
     // [N3F perf] 每 1000 步末统计 n3f 部分耗时
     if (mod == 999) {

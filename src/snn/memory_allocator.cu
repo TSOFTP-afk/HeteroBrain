@@ -175,6 +175,9 @@ size_t MemoryAllocator::allocate_all() {
     // 课程窗口累计 spike 平均发放率 (60K×4B = 0.23 MB)
     d_bufs_.d_curriculum_accum_spikes = alloc<float>(N_TOTAL_NEURONS_2E,
                                                      "d_curriculum_accum_spikes (60K)", &total);
+    // 2026-08-04 方案2: 浓度 readout 头 (6×6×4B = 144 B)
+    d_bufs_.d_curriculum_conc_weights = alloc<float>(6 * 6,
+                                                     "d_curriculum_conc_readout (6×6)", &total);
     // 2026-08-01 spec §7.9: 目标调质 + PAD + loss 归约缓冲 (消除静态懒分配)
     //   [0..6) = 调质目标, [6..9) = PAD 目标 (Task 5 扩展)
     d_bufs_.d_curriculum_target = alloc<float>(9, "d_curriculum_target (6 mod + 3 pad)", &total);
@@ -287,6 +290,7 @@ void MemoryAllocator::free_all() {
     FREE_PTR(d_bufs_.d_curriculum_pad_logits);
     FREE_PTR(d_bufs_.d_curriculum_pad_error);
     FREE_PTR(d_bufs_.d_curriculum_accum_spikes);
+    FREE_PTR(d_bufs_.d_curriculum_conc_weights);
     FREE_PTR(d_bufs_.d_curriculum_target);
     FREE_PTR(d_bufs_.d_curriculum_loss);
     FREE_PTR(d_bufs_.d_l5_to_motor_synapses);

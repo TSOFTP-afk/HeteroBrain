@@ -38,6 +38,16 @@ static size_t g_text_pos = 0;
 static bool g_text_loaded = false;
 static uint64_t g_text_fingerprint = 0;
 
+// 2026-08-05: 文本流注入间隔 (原编译宏 INPUT_INJECT_INTERVAL=3)
+//   由 main.cpp 通过 set_input_inject_interval 设置 (长线剧本模式用 1)
+static int g_input_inject_interval = 3;
+
+void set_input_inject_interval(int interval) {
+    g_input_inject_interval = interval > 0 ? interval : 1;
+    printf("[TextStream] 注入间隔 = %d 步/字节 (每段 400 步注入 %d 字节)\n",
+           g_input_inject_interval, 400 / g_input_inject_interval);
+}
+
 // 加载 UTF-8 文本语料到全局缓冲
 // 返回: 加载的字节数 (0 表示失败)
 size_t load_text_corpus(const char* filepath) {
@@ -126,6 +136,26 @@ bool set_text_stream_position(size_t position) {
 
 uint64_t text_corpus_fingerprint() { return g_text_fingerprint; }
 
+// 追加外部文本 (对话内容) 到文本流尾部 (2026-08-05, 引擎对话模式用)
+// 过滤语义与 load_text_corpus 一致: \r\n\t -> 空格; NUL 丢弃
+size_t append_text_stream(const char* bytes, size_t n) {
+    if (!bytes || n == 0) {
+        return g_text_buffer.size();
+    }
+    g_text_buffer.reserve(g_text_buffer.size() + n);
+    for (size_t i = 0; i < n; ++i) {
+        const unsigned char c = (unsigned char)bytes[i];
+        if (c == 0x00) continue;
+        if (c == '\r' || c == '\n' || c == '\t') {
+            g_text_buffer.push_back(' ');
+        } else {
+            g_text_buffer.push_back((char)c);
+        }
+    }
+    g_text_loaded = true;
+    return g_text_buffer.size();
+}
+
 // =============================================================================
 // input_inject_kernel: 群体编码注入
 // =============================================================================
@@ -209,7 +239,7 @@ void launch_input_inject(MemoryAllocator* alloc, uint8_t byte,
 // 真实文本模式: 从 LCCC 语料读取 UTF-8 字节流 (循环)
 // 回退模式: 未加载文本时使用 step % 256 循环 (P1 烟雾测试兼容)
 uint8_t get_byte_for_step(int step) {
-    // 每 INPUT_INJECT_INTERVAL 步注入一个新字节
+    // 每 g_input_inject_interval 步注入一个新字节 (默认 3, 可配置)
     if (g_text_loaded && !g_text_buffer.empty()) {
         // 真实文本模式: 从 LCCC 语料循环读取 UTF-8 字节
         uint8_t b = (uint8_t)g_text_buffer[g_text_pos];
@@ -217,7 +247,7 @@ uint8_t get_byte_for_step(int step) {
         return b;
     }
     // 回退模式: 0..255 循环 (未加载文本时)
-    int byte_idx = (step / INPUT_INJECT_INTERVAL) % INPUT_TEXT_CORPUS_LEN;
+    int byte_idx = (step / g_input_inject_interval) % INPUT_TEXT_CORPUS_LEN;
     return static_cast<uint8_t>(byte_idx);
 }
 
@@ -411,7 +441,7 @@ int32_t get_token_for_step(int step) {
         return tok;
     }
     // 回退模式: 0..50256 循环 (未加载 BPE 流时)
-    int tok_idx = (step / INPUT_INJECT_INTERVAL) % BPE_VOCAB_SIZE;
+    int tok_idx = (step / g_input_inject_interval) % BPE_VOCAB_SIZE;
     return static_cast<int32_t>(tok_idx);
 }
 

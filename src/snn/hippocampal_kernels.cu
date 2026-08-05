@@ -456,4 +456,35 @@ void launch_replay_cycle(
     launch_hippo_decay(d_indices, d_top_k_indices, batch_size);
 }
 
+std::vector<HippoIndex> read_hippo_memories(const HippoIndex* d_indices,
+                                            int* d_top_k_indices,
+                                            int* d_filled_count,
+                                            int k, int max_idx) {
+    std::vector<HippoIndex> out;
+    if (!d_indices || !d_top_k_indices || k <= 0 || max_idx <= 0) {
+        return out;
+    }
+    // 1. 取 importance top-K 索引 (GPU 端, 复用重放路径)
+    launch_hippo_get_top_k(d_indices, d_top_k_indices, d_filled_count, k, max_idx);
+    // 2. 拷回索引数组, 逐条读索引表
+    std::vector<int> idx((size_t)k, -1);
+    if (cudaMemcpy(idx.data(), d_top_k_indices, (size_t)k * sizeof(int),
+                   cudaMemcpyDeviceToHost) != cudaSuccess) {
+        return out;
+    }
+    out.reserve((size_t)k);
+    for (int i : idx) {
+        if (i < 0 || i >= max_idx) {
+            continue;
+        }
+        HippoIndex h;
+        if (cudaMemcpy(&h, d_indices + i, sizeof(HippoIndex),
+                       cudaMemcpyDeviceToHost) != cudaSuccess) {
+            break;
+        }
+        out.push_back(h);
+    }
+    return out;
+}
+
 } // namespace stage2e

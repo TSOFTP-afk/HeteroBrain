@@ -377,7 +377,8 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
                        float prediction_error_norm,
                        float empathy_signal,
                        const float* stage_baseline,
-                       bool deterministic)
+                       bool deterministic,
+                       int mod_interval)
 {
     PersistentBuffers& b = alloc->buffers();
     // DA 释放覆盖 [0, N_TOTAL_NEURONS_2E) = [0, 60000)
@@ -570,7 +571,7 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
             for (int i = 0; i < 6; ++i) h_event_signal[i] = 0.0f;
             h_event_pending_count = 0;
         } else {
-            h_event_duration_steps -= 100;  // launch_modulatory 每 100 步调用一次
+            h_event_duration_steps -= mod_interval;  // 每次调用消耗一个调制间隔 (2026-08-05 参数化)
         }
     }
 
@@ -583,13 +584,13 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
     gaba_signal     *= h_receptor_sensitivity[4];
     oxytocin_signal *= h_receptor_sensitivity[5];
 
-    // 衰减率: 100步 / tau
-    float da_decay       = expf(-100.0f / DA_TAU);
-    float ach_decay      = expf(-100.0f / ACH_TAU);
-    float ne_decay       = expf(-100.0f / NE_TAU);
-    float ht5_decay      = expf(-100.0f / HT5_TAU);
-    float gaba_decay     = expf(-100.0f / GABA_TAU);          // Phase 3a
-    float oxytocin_decay = expf(-100.0f / OXYTOCIN_TAU);      // Phase 3a
+    // 衰减率: mod_interval 步 / tau (2026-08-05 参数化: 原硬编码 100 步)
+    float da_decay       = expf(-(float)mod_interval / DA_TAU);
+    float ach_decay      = expf(-(float)mod_interval / ACH_TAU);
+    float ne_decay       = expf(-(float)mod_interval / NE_TAU);
+    float ht5_decay      = expf(-(float)mod_interval / HT5_TAU);
+    float gaba_decay     = expf(-(float)mod_interval / GABA_TAU);          // Phase 3a
+    float oxytocin_decay = expf(-(float)mod_interval / OXYTOCIN_TAU);      // Phase 3a
 
     modulatory_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
         b.d_da_concentration, b.d_ach_concentration,

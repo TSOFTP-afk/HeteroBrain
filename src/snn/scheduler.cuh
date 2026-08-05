@@ -88,6 +88,18 @@ public:
     //   存储此处供后续 kernel 改造使用, 当前仅作元数据记录
     float decode_lr = DECODE_LEARNING_RATE;
 
+    // 跳过 checkpoint corpus 指纹校验 (2026-08-05 引擎接线):
+    //   引擎对话模式不关心文本语料身份 (SNN 仅做情感演化), 语料缺失时跳过校验,
+    //   避免 "corpus does not match checkpoint" (code=8) 阻断 resume;
+    //   加载了语料 (--text) 时保持严格校验, 与 snn_train 语义一致。
+    bool skip_corpus_check = false;
+
+    // 调制更新间隔 (2026-08-05 引擎接线):
+    //   慢时间尺度 (launch_modulatory / scaling / 情感采样) 的触发周期。
+    //   默认 100 保持训练语义; 引擎对话模式可降为 10 (1.4s/更新) 加快情感响应,
+    //   衰减率与事件 duration 消耗已按此参数化 (modulatory_kernels.cu)。
+    int mod_update_interval = 100;
+
     // ==================== Task D2: BPTT 集成配置 ====================
     // bptt_enabled: true 时启用 BPTT 代理梯度训练 (主训练算法)
     //   默认 false, 由 main.cpp 根据 RunConfig.bptt_mode 设置
@@ -96,9 +108,18 @@ public:
     // skip_structural_rebuild: 跳过 P3-D 结构重建 (纯 STDP 模式防 GPU hang,
     //   与 BPTT 模式拓扑保持稳定行为一致; 由 RunConfig.no_structural_rebuild 设置)
     bool skip_structural_rebuild = false;
+    // skip_replay: 跳过睡眠重放 + 同周期语义评估 (2026-08-05 引擎接线):
+    //   引擎对话模式不需要重放巩固; 且实测重放 kernel 之后紧邻的 llama decode
+    //   会输出垃圾 logits → 采样立即 EOG (空回复, 60K 首轮复现; 15K 无重放正常)。
+    //   训练模式保持默认 false (重放照常)。
+    bool skip_replay = false;
     // bptt_input_mode: 0=byte (旧), 1=bpe (新)
     //   由 main.cpp 根据 RunConfig.input_mode 设置
     int  bptt_input_mode = 0;
+    // 2026-08-05: 文本流注入间隔 (原编译宏 INPUT_INJECT_INTERVAL=3)
+    //   由 main.cpp 根据 RunConfig.input_inject_interval 设置;
+    //   长线剧本模式用 1 使文本流与每窗口事件时间同步
+    int  input_inject_interval = 3;
     // bptt_window_boundary: BPTT 窗口边界步数 (window_size 的倍数)
     //   每到此步触发一次 forward+backward+update
     int  bptt_window_size = 50;
@@ -209,6 +230,14 @@ public:
     //   d_reconstructed_out: [N_ASSOCIATION_NEURONS_2E] 输出重建 (device, 调用方分配)
     void pca_back_project(const float* d_signature, float* d_reconstructed_out);
 
+    // 从 PCA 签名解码字节概率分布 (host 端, 2026-08-05 二期: SNN 记忆内容解码)
+    //   反投影: rate[i] = mean_fr[i] + Σ_k sig[k]·W[i,k]   (i < N_ASSOCIATION_NEURONS_2E)
+    //   logits[b] = Σ_i decode_W[i*256+b]·rate[i] → softmax → top-k 字节
+    // 解码器是"单步预测器" (网络状态 → 下一字节分布), 故输出 top-k 字节而非自回归文本。
+    // out_bytes/out_probs: 调用方分配 ≥k 元素; 返回实际填充数 (≤k, 失败返回 0)
+    int decode_signature_top_bytes(const float* sig50,
+                                   uint8_t* out_bytes, float* out_probs, int k);
+
     // PCA 更新次数计数 (供 FINAL_METRICS 输出)
     int pca_update_count() const { return pca_update_count_; }
 
@@ -252,6 +281,11 @@ public:
     //   base_signal: 阶段基线, GENE_MAP 列顺序 [DA,ACh,NE,5HT,GABA,Oxy]
     void advance_curriculum_target(const CurriculumSample* sample, int rel,
                                    const float base_signal[6]);
+    // 复位浓度模拟器到冷启动 (conc=0, sensitivity=1), 同步刷新当前块目标
+    //   (2026-08-04 修复: 原实现跨样本/窗口持续运行不重置, 慢通道 Oxy tau=500
+    //   残留累积 → 目标漂移到稳态不动点, 调质 MSE 度量"稳态拟合"而非
+    //   "事件→调质响应"; 样本/窗口边界必须调用, 使目标 = baseline + 本样本事件响应)
+    void reset_curriculum_target();
     // 当前块模拟浓度/PAD 目标 (分段监督: N3F 每步误差与窗口末 readout 更新用,
     //   与内部注入同步推进的连续浓度; 2026-08-02 Task 8)
     const float* curriculum_target_mod_curr() const { return curriculum_target_mod_curr_; }
@@ -273,6 +307,13 @@ public:
     void set_bptt_freeze(bool freeze) { bptt_freeze_ = freeze; }
     bool bptt_freeze() const { return bptt_freeze_; }
 
+    // 冻结突触权重写入 (评估模式, 2026-08-04 B3 修复):
+    //   eval 期间跳过 STDP / CaMKII / scaling / 结构可塑性 (证据衰减+弱突触重置)
+    //   的权重写入 — 旧实现只冻结 BPTT/readout, 突触权重仍被持续修改,
+    //   评估样本间网络漂移, eval 结果非严格冻结 (n_eval×win≥1000 必触发衰减/重建)
+    void set_weights_freeze(bool freeze) { weights_freeze_ = freeze; }
+    bool weights_freeze() const { return weights_freeze_; }
+
     // ==================== N3F: 调质门控三因子在线学习 ====================
     // 设置课程突触学习算法: "bptt" (窗口重放反传) | "n3f" (三因子在线)
     //   n3f 模式: 每步课程误差 → 神经元级 eligibility → STDP 证据调制,
@@ -280,13 +321,12 @@ public:
     void set_learning_rule(const std::string& rule) { learning_rule_ = rule; }
     bool n3f_mode() const { return learning_rule_ == "n3f"; }
     // N3F 每步在线学习 (在 scheduler.step() 之后由 main.cpp 调用):
-    //   readout 前向 (当前帧) → 课程误差 → eligibility 教学信号注入
+    //   readout 前向 (当前帧) → 课程误差 → readout 监督 (每步)
     //   readout 权重在窗口末由 main.cpp 切换分支更新 (累计帧)
     //   loss 同步回读仅每窗口 (step % window == 0) 一次, 避免每步阻塞流水线
-    //   allow_elig_inject: 事件门控 — 仅当窗口内课程样本事件已注入
-    //   (evt.step_offset == rel) 后为 true, 才允许 eligibility 注入;
-    //   事件前不注入, 消除教学目标与事件注入时序失配造成的虚假误差 (§7.1)
-    void n3f_online_step(int current_step, bool allow_elig_inject);
+    //   范式切换 (B5, 2026-08-04): 不再注入 eligibility 到突触 (spec §7.2),
+    //   突触塑形回归 STDP + 沙盒反馈; readout 监督路径保留
+    void n3f_online_step(int current_step);
 
     // N3F 具身奖励 → 神经元级 eligibility (第三因子, spec §7.1, 2026-08-01)
     //   reward ∈ [-1,1]: reward>0 强化, reward<0 削弱 (uniform 广播, 生物对应 DA 系统)
@@ -402,6 +442,9 @@ private:
     std::vector<float> h_fr_snapshot_;
     // 联合皮层滑动平均发放率 [N_ASSOCIATION_NEURONS_2E] (PCA 中心化用)
     std::vector<float> h_mean_fr_;
+    // 解码器权重 host 镜像 (懒加载, N_TOTAL_NEURONS_2E×256, 2026-08-05 二期)
+    std::vector<float> h_decode_weights_;
+    bool h_decode_weights_loaded_ = false;
     // spike_flags (bool) → float 转换用 host 中转缓冲 [N_ASSOCIATION_NEURONS_2E]
     std::vector<uint8_t> h_spike_buf_;
     // 滑动平均 EMA 系数 (越大越平滑, 0.99 = 时间常数 ~100 步)
@@ -456,6 +499,7 @@ private:
                                             //   初中 0.3 / 高中 0.5; 启蒙/成年 0 → 无贡献)
     float curriculum_last_loss_ = 0.0f;     // 最近一次课程 BPTT loss
     bool  bptt_freeze_ = false;             // 冻结 BPTT 更新 (评估模式)
+    bool  weights_freeze_ = false;          // 冻结突触权重写入 (评估模式, B3)
     std::string learning_rule_ = "bptt";    // 课程突触学习算法: bptt | n3f
 
     // ---- 阶段参数 (仅课程模式生效, 由 set_curriculum_stage 填充) ----

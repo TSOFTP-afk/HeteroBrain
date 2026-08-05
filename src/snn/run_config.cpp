@@ -194,6 +194,14 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
             value = require_value(&i, "--bpe-data");
             if (!value) return false;
             config->bpe_data_path = value;
+        } else if (arg == "--input-inject-interval") {
+            // 2026-08-05: 文本流注入间隔 (1-10, 默认 3)
+            //   长线剧本模式建议 1: 每段 400 步注入 400 字节 ≈ 叙事 330 字节,
+            //   事件与文本流时间同步
+            value = require_value(&i, "--input-inject-interval");
+            if (!value) return false;
+            if (!parse_long(value, 1, 10, "--input-inject-interval", &parsed, error)) return false;
+            config->input_inject_interval = static_cast<int>(parsed);
         } else if (arg == "--event-stream") {
             // Phase 3a-C1: 事件驱动调质注入流文件路径
             value = require_value(&i, "--event-stream");
@@ -235,6 +243,11 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
             if (!value) return false;
             if (!parse_long(value, 1, 100000, "--curriculum-eval-samples", &parsed, error)) return false;
             config->curriculum_eval_samples = static_cast<int>(parsed);
+        } else if (arg == "--curriculum-continuous") {
+            // 2026-08-05: 连续课程模式 — 窗口边界不复位浓度模拟器,
+            //   前序窗口状态传导到后续窗口 (远程因果训练), 配套
+            //   generate_serial_curriculum.py 连续叙事数据
+            config->curriculum_continuous = true;
         } else if (arg == "--learning-rule") {
             // Phase 3a-D3: 课程突触学习算法 (bptt=窗口反传 / n3f=三因子在线)
             value = require_value(&i, "--learning-rule");
@@ -296,6 +309,9 @@ const char* run_config_usage() {
         "  --bptt-surrogate-alpha F  surrogate gradient sigmoid slope (default: 4.0)\n"
         "  --input-mode MODE         input mode: bpe (default) or byte\n"
         "  --bpe-data PATH           BPE token binary file path (.bin int32 stream)\n"
+        "  --input-inject-interval N text-stream injection interval in steps (default: 3,\n"
+        "                             range 1-10; long-arc curriculum: use 1 to sync\n"
+        "                             text-stream with per-window events)\n"
         "  --event-stream PATH       enable event-driven modulator injection from JSONL\n"
         "  --curriculum PATH         Phase 3a-D3 curriculum training data (JSONL)\n"
         "  --curriculum-stage N      curriculum stage: 0=enlightenment 1=middle(默认) 2=high 3=adult\n"
@@ -303,6 +319,9 @@ const char* run_config_usage() {
         "  --curriculum-eval         eval mode: freeze weights, report tool-accuracy & modulator MSE\n"
         "  --curriculum-eval-samples N  number of eval samples (default: 100)\n"
         "  --curriculum-readout-warmup N  N3F: freeze readout update for first N steps (spec 7.7)\n"
+        "  --curriculum-continuous   continuous curriculum: no concentration-sim reset at\n"
+        "                             window boundary (long-range causal training; pair with\n"
+        "                             generate_serial_curriculum.py serial narrative data)\n"
         "  --learning-rule ALGO      curriculum synapse learning: bptt (window backprop) | n3f\n"
         "                             (neuromodulator-gated 3-factor online, default: bptt)\n"
         "  --embodied                enable embodied developmental mode (Phase 3a-D1)\n"

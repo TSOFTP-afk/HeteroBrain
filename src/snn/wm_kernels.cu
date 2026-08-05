@@ -24,6 +24,7 @@
 // =============================================================================
 
 #include "wm_kernels.cuh"
+#include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <cuda_runtime.h>
@@ -297,6 +298,25 @@ void launch_merge_prefrontal_input(const float* d_pf_input, float* d_input_curre
     merge_prefrontal_input_kernel<<<blocks, THREADS_PER_BLOCK_2E>>>(
         d_pf_input, d_input_current, n_pf, pf_start);
     CUDA_CHECK_LAST_2E();
+}
+
+std::vector<WMSlot> read_wm_slots(const WMSlot* d_slots, int n_slots, int max_count) {
+    std::vector<WMSlot> out;
+    if (!d_slots || n_slots <= 0) {
+        return out;
+    }
+    std::vector<WMSlot> h(n_slots);
+    if (cudaMemcpy(h.data(), d_slots, (size_t)n_slots * sizeof(WMSlot),
+                   cudaMemcpyDeviceToHost) != cudaSuccess) {
+        return out;
+    }
+    // 按 activation 降序, 取前 max_count 条 (活跃记忆优先)
+    std::sort(h.begin(), h.end(),
+              [](const WMSlot& a, const WMSlot& b) { return a.activation > b.activation; });
+    if (max_count > 0 && (int)h.size() > max_count) {
+        h.resize((size_t)max_count);
+    }
+    return h;
 }
 
 } // namespace stage2e

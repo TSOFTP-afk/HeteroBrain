@@ -37,6 +37,7 @@
 #include "config.h"
 #include "types.h"
 #include <cuda_runtime.h>
+#include <vector>
 
 namespace stage2e {
 
@@ -146,6 +147,16 @@ void launch_replay_cycle(
     const float* d_pca_mean,
     float* d_reconstructed_buffer,
     int step, int max_indices, int batch_size);
+
+// 读海马记忆 top-K (host 端, 2026-08-05 引擎对话模式新增)
+// 按 importance 取前 k 条索引 (复用 launch_hippo_get_top_k), 逐条拷回 host,
+// 返回的 HippoIndex 含 pattern_start_step (写入步) 与 importance。
+// 供引擎把"SNN 记住了什么"拼进 LLM system prompt。
+// 注意: 索引存的是 50 维 PCA 神经签名 (非文本), importance 高 = 记得更牢。
+std::vector<HippoIndex> read_hippo_memories(const HippoIndex* d_indices,
+                                            int* d_top_k_indices,
+                                            int* d_filled_count,
+                                            int k, int max_idx);
 
 } // namespace stage2e
 

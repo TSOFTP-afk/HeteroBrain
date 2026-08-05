@@ -179,7 +179,7 @@ static void print_experiment_metadata(FILE* fp, const char* prefix,
     emit_run_param(fp, prefix, "stp_tau_rec_inv", "%.6f", STP_TAU_REC_INV);
     emit_run_param(fp, prefix, "pop_coding_k_per_column", "%d", POP_CODING_K_PER_COLUMN);
     emit_run_param(fp, prefix, "pop_coding_gain", "%.6f", POP_CODING_GAIN);
-    emit_run_param(fp, prefix, "input_inject_interval", "%d", INPUT_INJECT_INTERVAL);
+    emit_run_param(fp, prefix, "input_inject_interval", "%d", config.input_inject_interval);
     emit_run_param(fp, prefix, "input_text_corpus_len", "%d", INPUT_TEXT_CORPUS_LEN);
     // 丘脑-皮层门控参数 (§1.1 注意力门控)
     emit_run_param(fp, prefix, "gate_update_rate", "%.6f", GATE_UPDATE_RATE);
@@ -735,8 +735,13 @@ int main(int argc, char** argv) {
     scheduler.decode_update_weights = !config.eval_mode;
     scheduler.decode_lr = config.decode_lr;
     if (config.eval_mode) {
+        // B7 修复 (2026-08-04): eval_mode 统一评估冻结 — 除 decode 冻结外,
+        //   BPTT 反传与 STDP/证据等突触权重写入一并冻结 (原实现 BPTT 每窗口
+        //   照常反传、STDP 照常运行, 评估样本间网络漂移)
+        scheduler.set_bptt_freeze(true);
+        scheduler.set_weights_freeze(true);
         printf("  *** 评估模式: decode_step 不更新 W_decode (仅前向预测) ***\n");
-        printf("  *** scheduler.decode_update_weights = false ***\n\n");
+        printf("  *** scheduler.decode_update_weights = false, BPTT/权重冻结 ***\n\n");
     }
     printf("  [Task 10] decode_lr = %.6f (config.decode_lr)\n\n", config.decode_lr);
 
@@ -744,6 +749,9 @@ int main(int argc, char** argv) {
     // 默认 bptt_mode=true (主训练算法), --no-bptt 关闭
     scheduler.bptt_enabled = config.bptt_mode;
     scheduler.bptt_input_mode = (config.input_mode == "bpe") ? 1 : 0;
+    // 2026-08-05: 文本流注入间隔 (默认 3 与历史实验一致; 长线剧本模式用 1 同步)
+    scheduler.input_inject_interval = config.input_inject_interval;
+    stage2e::set_input_inject_interval(config.input_inject_interval);
     // 纯 STDP 模式可选跳过结构重建 (防 GPU hang)
     scheduler.skip_structural_rebuild = config.no_structural_rebuild;
 
@@ -830,6 +838,22 @@ int main(int argc, char** argv) {
                 config.curriculum_lr,
                 prof.bptt_loss_weight_mod, prof.bptt_loss_weight_tool);
         }
+    } else if (config.embodied_mode) {
+        // 2026-08-04 修复 (启蒙期 eta 缺口): 非课程纯具身模式 (启蒙/成年) 时
+        //   阶段参数从未生效 — set_curriculum_stage 只在 curriculum_active 时调用,
+        //   非课程模式 stdp_eta_multiplier_ 恒 1.0 (scheduler.cuh L475 注释).
+        //   具身/启蒙训练也按 --curriculum-stage 设置阶段参数:
+        //   启蒙 eta 3.0 (快速自组织) / 初中 1.5 / 高中 1.0 / 成年 0.3 (稳定化).
+        //   仅设置阶段参数, 不启用课程模式 (无 readout 监督).
+        scheduler.set_curriculum_stage(
+            static_cast<stage2e::CurriculumStage>(config.curriculum_stage));
+        printf("  [Task D3] 纯具身模式: 阶段参数已接线 stage=%d(%s) "
+               "stdp_eta=%.1f (非课程模式原恒 1.0)\n",
+               config.curriculum_stage,
+               stage2e::personality_profile(
+                   static_cast<stage2e::CurriculumStage>(config.curriculum_stage)).name,
+               stage2e::personality_profile(
+                   static_cast<stage2e::CurriculumStage>(config.curriculum_stage)).stdp_eta_multiplier);
     }
 
     int start_step = 0;
@@ -864,6 +888,14 @@ int main(int argc, char** argv) {
     // 注: 样本↔窗口映射不随 checkpoint 持久化, resume 后样本序号仍从 0 重新循环 (已文档化)
     if (curriculum_active && start_step > 0) {
         curriculum_window_start = start_step;
+        // P1-6 修复 (2026-08-04): resume 后首窗口从 rel=0 重新开始, 但
+        //   d_curriculum_accum_spikes 保留 checkpoint 时点中途值 (readout 特征
+        //   混入旧样本发放), 且浓度模拟器为运行时状态 (未持久化, 目标全零直到
+        //   首个 advance) → 首窗口前清空累计缓冲 + 复位目标到冷启动 baseline
+        // 2026-08-05: 连续模式 resume 后同样复位一次 — 模拟器状态不随 checkpoint
+        //   持久化, 重启后从冷启动对齐 (故事线起点), 与训练起点语义一致.
+        stage2e::launch_curriculum_accum_clear(allocator.buffers());
+        scheduler.reset_curriculum_target();
     }
 
     // --- 5. 主循环 ---
@@ -880,7 +912,7 @@ int main(int argc, char** argv) {
                             "xpre_sum,xpre_nz,ca_sum,ca_nz,weight_mean,weight_abs_mean,"
                             "weight_min,weight_max,arrived_events,dispatched_events,dropped_events,max_slot_depth");
                 if (config.embodied_mode) {
-                    fprintf(csv_fp, ",hunger,temp,comfort,fatigue,arousal,cry,approach,avoid,interact,threat,reward");
+                    fprintf(csv_fp, ",hunger,temp,comfort,fatigue,pain,cycle,arousal,cry,approach,avoid,interact,threat,reward");
                 }
                 fprintf(csv_fp, "\n");
             }
@@ -896,6 +928,15 @@ int main(int argc, char** argv) {
         const int n_eval = std::min(config.curriculum_eval_samples,
                                     static_cast<int>(curriculum_loader.total_samples()));
         scheduler.set_bptt_freeze(true);
+        // B3 修复 (2026-08-04): 评估真冻结 — 除 BPTT/readout 外, 统一冻结突触
+        //   权重写入 (STDP/CaMKII/scaling/结构可塑性/证据衰减), 防止评估样本间
+        //   网络漂移 (旧实现 n_eval×win≥1000 时衰减/重建必触发, eval 非严格冻结)
+        scheduler.set_weights_freeze(true);
+        // B6 修复 (2026-08-04): curriculum-eval 也冻结 decode 权重更新 —
+        //   若不传 --eval-mode, decode_update_weights 保持 true, 且
+        //   INPUT_INJECT_INTERVAL=3 → decode 每 3 步持续学习 (§8.3 严重性升级),
+        //   评估结果被 decode 学习污染
+        scheduler.decode_update_weights = false;
         printf("[CurriculumEval] 评估 %d 个样本 (权重冻结, readout 不被更新)...\n", n_eval);
 
         const stage2e::PersonalityProfile& prof =
@@ -907,10 +948,38 @@ int main(int argc, char** argv) {
         double pad_mse_sum = 0.0, pad_mae_sum = 0.0;  // 2026-08-02 Task 5: PAD 预测误差统计
         float last_h_tool[7] = {0};
         int step = start_step;
+        // 2026-08-04 防护: 课程事件 step_offset 为 100 倍数 (≥100), 若事件最大
+        //   offset ≥ eval 窗口则部分事件无法注入 (t 范围 [0, win-1]) → 目标缺失
+        //   对应事件响应. 课程数据 max_offset=400, 窗口 400 时 offset=400 事件
+        //   (10.7% 样本) 不注入 — 与训练 140K 行为一致 (公平评估); 若需完整
+        //   注入全部事件, 用 --bptt-window-size 500.
+        {
+            int max_offset = 0;
+            const stage2e::CurriculumSample* s0 = curriculum_loader.sample(0);
+            if (s0) {
+                for (const auto& evt : s0->events)
+                    if (evt.step_offset > max_offset) max_offset = evt.step_offset;
+            }
+            if (max_offset >= win) {
+                printf("[CurriculumEval] 警告: 事件最大 offset %d ≥ 窗口 %d, "
+                       "offset=%d 边界事件无法注入 (t∈[0,%d); 与训练一致时可接受,"
+                       " 完整注入请用 --bptt-window-size 500)\n",
+                       max_offset, win, max_offset, win - 1);
+            }
+        }
 
         for (int s = 0; s < n_eval; ++s) {
             const stage2e::CurriculumSample* smp = curriculum_loader.sample(s);
             if (!smp) continue;
+            // 2026-08-04 修复: 每个评估样本复位浓度模拟器 (冷启动 conc=0/sens=1,
+            //   首个 advance 注入阶段基线 → 窗口起点 = baseline), 目标 =
+            //   baseline + 本样本事件响应. 原实现跨样本不重置, 慢通道 (Oxy tau=500)
+            //   残留累积 → 目标漂移到稳态, 调质 MSE 失真 (sample≥10 目标几乎恒定).
+            // 2026-08-05: --curriculum-continuous 时仅首样本复位 — 评估须模拟
+            //   训练时的连续模式 (样本间状态延续), 否则目标口径与训练不一致.
+            if (!config.curriculum_continuous || s == 0) {
+                scheduler.reset_curriculum_target();
+            }
             // 2026-08-02 Task A 接线: set_curriculum_stage 先于 set_curriculum_mode
             scheduler.set_curriculum_stage(
                 static_cast<stage2e::CurriculumStage>(config.curriculum_stage));
@@ -954,6 +1023,28 @@ int main(int argc, char** argv) {
             }
             // 窗口末: readout 前向 + 读 logits
             stage2e::PersistentBuffers& b = allocator.buffers();
+            // 2026-08-04 诊断: 打印窗口累计发放率统计 (非零神经元数 + top 发放差异)
+            //   验证事件调制是否进入 readout 输入特征 rate[i] (d_curriculum_accum_spikes)
+            {
+                std::vector<float> h_rate(N_TOTAL_NEURONS_2E, 0.0f);
+                cudaMemcpy(h_rate.data(), b.d_curriculum_accum_spikes,
+                           N_TOTAL_NEURONS_2E * sizeof(float), cudaMemcpyDeviceToHost);
+                size_t nz = 0;
+                double sum_rate = 0.0;
+                for (int i = 0; i < N_TOTAL_NEURONS_2E; ++i) {
+                    if (h_rate[i] > 0.0f) { ++nz; sum_rate += h_rate[i]; }
+                }
+                std::vector<int> top(N_TOTAL_NEURONS_2E);
+                for (int i = 0; i < N_TOTAL_NEURONS_2E; ++i) top[i] = i;
+                std::partial_sort(top.begin(), top.begin() + 10, top.end(),
+                                  [&](int a, int b) { return h_rate[a] > h_rate[b]; });
+                printf("[RateStat] sample=%d nz=%zu/%d (%.4f) sum_rate=%.4f top10=[",
+                       smp->sample_id, nz, N_TOTAL_NEURONS_2E,
+                       static_cast<double>(nz) / N_TOTAL_NEURONS_2E, sum_rate);
+                for (int k = 0; k < 10; ++k)
+                    printf("%d:%.3f%s", top[k], h_rate[top[k]], k < 9 ? " " : "");
+                printf("]\n");
+            }
             stage2e::launch_curriculum_readout_forward(b);
             stage2e::launch_curriculum_pad_forward(b);  // 2026-08-02 Task 5: PAD 头 (累计帧)
             float h_mod[6] = {0}, h_tool[7] = {0}, h_pad[3] = {0};
@@ -1045,26 +1136,25 @@ int main(int argc, char** argv) {
     float sensory_signals[50] = {0};
     float embodied_reward = 0.0f;
     if (embodied_active) {
-        embodied_env.init(config.embodied_scene);
+        // B11 修复 (2026-08-04): 接入 config.seed, 不同 --seed 沙盒序列可复现
+        //   (原实现 motor_rng 用固定兜底种子, 不同 seed 得到相同动作序列)
+        stage2e::motor_rng_seed(config.seed);
+        // 2026-08-04 (学生标准): 生理模型按课程阶段分层 (青春期少女)
+        embodied_env.init(config.embodied_scene, config.curriculum_stage);
         printf("[P1] 具身发育模式已启用: 场景=%s\n", config.embodied_scene.c_str());
-        printf("[P1]   初始状态: hunger=%.2f temp=%.2f comfort=%.2f fatigue=%.2f arousal=%.2f\n",
+        printf("[P1]   初始状态: hunger=%.2f temp=%.2f comfort=%.2f fatigue=%.2f pain=%.2f arousal=%.2f\n",
                embodied_env.body.hunger, embodied_env.body.temperature,
                embodied_env.body.comfort, embodied_env.body.fatigue,
-               embodied_env.body.arousal_value());
+               embodied_env.body.pain, embodied_env.body.arousal_value());
     }
 
     for (int step = start_step; step < total_steps; ++step) {
-        // N3F 事件门控 (spec §7.1 恢复 2026-08-02): 当前课程窗口内样本事件
-        //   是否已注入. 事件注入循环 (evt.step_offset == rel) 置 true,
-        //   窗口切换时重置 false → 仅事件已注入的步才允许 eligibility 注入,
-        //   消除教学目标与事件注入时序失配的虚假误差.
-        bool window_event_injected = false;
         // ==================== Task D3: BPE 输入注入 ====================
         // 在 scheduler.step() 之前注入输入 (字节或 BPE token)
         // scheduler.step() 内部会读取 d_input_current (已注入的电流)
         // 字节模式: scheduler.step() 内部调用 launch_input_inject (向后兼容)
         // BPE 模式:  此处由 main.cpp 调用 launch_bpe_inject (scheduler 内部跳过)
-        bool is_inject_step = (step % INPUT_INJECT_INTERVAL == 0);
+        bool is_inject_step = (step % config.input_inject_interval == 0);
         if (is_inject_step && config.input_mode == "bpe" && stage2e::is_bpe_loaded()) {
             int32_t token = stage2e::get_token_for_step(step);
             stage2e::launch_bpe_inject(&allocator, token,
@@ -1090,8 +1180,6 @@ int main(int argc, char** argv) {
                 // 窗口结束 → 切换下一个样本
                 curriculum_window_start = step;
                 rel = 0;
-                // N3F 事件门控: 新窗口事件尚未注入, 重置门控 (§7.1 恢复)
-                window_event_injected = false;
                 // N3F: 窗口末 readout 更新 (spec §7.2 修复: 累计误差, 非最后一步单步误差)
                 //   1. 累计帧前向 (与 BPTT 语义一致: 窗口累计发放率作 readout 特征)
                 //   2. 用当前样本目标计算累计误差 (写回 d_curriculum_error)
@@ -1124,6 +1212,18 @@ int main(int argc, char** argv) {
                             prof_now.bptt_loss_weight_mod, prof_now.bptt_loss_weight_tool,
                             prof_now.bptt_loss_weight_pad);
                     }
+                }
+                // 2026-08-04 修复: 窗口末 readout 更新**之后**、新窗口累计**之前**复位
+                //   浓度模拟器 — 窗口末 readout 更新须用旧窗口末模拟浓度目标 (上方
+                //   curriculum_target_mod_curr_ 读取); 若在 readout 更新前 reset,
+                //   目标为全零 → 每个窗口把 readout 朝"输出零"拉一步 (P0 回归, 已修).
+                //   复位后新窗口从冷启动出发, 首个 advance (rel=0) 注入阶段基线,
+                //   目标 = baseline + 本样本事件响应.
+                // 2026-08-05: --curriculum-continuous 时跳过复位 → 前序窗口慢通道
+                //   残留 (Oxy tau=500) 传导到后续窗口, 配合连续叙事数据学远程因果;
+                //   冷启动 (默认) 行为与 2026-08-04 修复后一致.
+                if (!config.curriculum_continuous) {
+                    scheduler.reset_curriculum_target();
                 }
                 // 清零窗口累计 spike 缓冲 (新窗口从零开始累计)
                 stage2e::launch_curriculum_accum_clear(allocator.buffers());
@@ -1173,8 +1273,6 @@ int main(int argc, char** argv) {
                                           entry.ne_delta, entry.ht5_delta,
                                           entry.gaba_delta, entry.oxy_delta};
                         stage2e::set_event_signal(delta, 0);
-                        // N3F 事件门控: 事件已注入 → 本步允许 eligibility 注入
-                        window_event_injected = true;
                         printf("[Curriculum-Event] step=%d (rel=%d) type=%d intensity=%d\n",
                                step, rel, evt.event_type, evt.intensity);
                     }
@@ -1245,13 +1343,17 @@ int main(int argc, char** argv) {
             stage2e::launch_motor_teacher(allocator.buffers(), target_action, 0.0f,
                                           embodied_reward, motor_readout);
 
-            // 6. 日志 (认知动作 + 内感态 + 环境信号)
-            printf("[EMBODIED step=%d] hunger=%.2f temp=%.2f comfort=%.2f fatigue=%.2f aro=%.2f "
+            // 6. 日志 (认知动作 + 内感态 + 生理周期 + 环境信号)
+            printf("[EMBODIED step=%d] hunger=%.2f temp=%.2f comfort=%.2f fatigue=%.2f pain=%.2f aro=%.2f "
+                   "| cycle=%.2f %s "
                    "| cry=%.2f gaze=%.2f appr=%.2f avd=%.2f intr=%.2f "
                    "| threat=%.2f novel=%.2f reward=%.4f\n",
                    step, embodied_env.body.hunger, embodied_env.body.temperature,
                    embodied_env.body.comfort, embodied_env.body.fatigue,
-                   embodied_env.body.arousal_value(),
+                   embodied_env.body.pain, embodied_env.body.arousal_value(),
+                   embodied_env.body.cycle_phase,
+                   embodied_env.body.menstrual_phase() ? "(经期)" :
+                       (embodied_env.body.pms_phase() ? "(黄体期)" : ""),
                    motor_readout.cry_intensity, motor_readout.gaze_intensity,
                    motor_readout.approach_strength, motor_readout.avoid_strength,
                    motor_readout.interact_intensity,
@@ -1294,10 +1396,11 @@ int main(int argc, char** argv) {
         // Phase 3a-D3: 课程模式逐帧累计 spike 平均发放率
         //   (readout 前向/更新的输入特征: 窗口累计率, 编码事件调质的持续影响)
         if (curriculum_active) {
-            // N3F: 每步在线教学信号注入 (readout 当前帧前向 → 课程误差 → eligibility)
-            //   window_event_injected: 事件门控 — 仅事件已注入的步才注入 eligibility
+            // N3F: 每步在线 readout 监督 (当前帧前向 → 课程误差; readout 权重
+            //   窗口末更新). 范式切换 (B5, 2026-08-04): 不再注入 eligibility
+            //   到突触, 突触塑形回归 STDP + 沙盒反馈 (spec §7.2)
             if (config.learning_rule == "n3f") {
-                scheduler.n3f_online_step(step, window_event_injected);
+                scheduler.n3f_online_step(step);
             }
             stage2e::launch_curriculum_accumulate(allocator.buffers(),
                                                   config.bptt_window_size);
@@ -1347,7 +1450,7 @@ int main(int argc, char** argv) {
             stage2e::device_synapse_weight_stats(b.d_synapses, 100000, w_offset,
                                                  &wmean, &wabs_mean, &wmin, &wmax);
 
-            bool is_inject = (step % INPUT_INJECT_INTERVAL == 0);
+            bool is_inject = (step % config.input_inject_interval == 0);
             uint8_t byte = is_inject ? stage2e::get_byte_for_step(step) : 0;
 
             fprintf(csv_fp, "%d,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
@@ -1371,10 +1474,12 @@ int main(int argc, char** argv) {
                     scheduler.max_delay_slot_depth());
             // Phase 3a-D1/D2: 内感态 + 认知动作 + 环境信号追加到CSV
             if (embodied_active) {
-                fprintf(csv_fp, ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
+                fprintf(csv_fp, ",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f",
                         embodied_env.body.hunger, embodied_env.body.temperature,
                         embodied_env.body.comfort, embodied_env.body.fatigue,
-                        embodied_env.body.arousal_value(), motor_readout.cry_intensity,
+                        embodied_env.body.pain, embodied_env.body.cycle_phase,
+                        embodied_env.body.arousal_value(),
+                        motor_readout.cry_intensity,
                         motor_readout.approach_strength, motor_readout.avoid_strength,
                         motor_readout.interact_intensity,
                         embodied_env.threat_level, embodied_reward);
@@ -1942,7 +2047,7 @@ int main(int argc, char** argv) {
                    cudaMemcpyDeviceToHost);
 
         // 计算每个字节的注入次数 (应该相等, 但用实际值更安全)
-        int total_injections = total_steps / INPUT_INJECT_INTERVAL;
+        int total_injections = total_steps / config.input_inject_interval;
         std::vector<int> injections_per_byte(total_bytes, 0);
         for (int b = 0; b < total_bytes; ++b) {
             injections_per_byte[b] = total_injections / total_bytes;

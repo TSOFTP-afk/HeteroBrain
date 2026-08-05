@@ -138,6 +138,22 @@ bool EventScheduler::load_jsonl(const std::string& path) {
                   return a.step_target < b.step_target;
               });
 
+    // P1-2 修复 (2026-08-04): 事件流数据契约告警 — launch_modulatory 每 100 步
+    //   才读取事件信号, 非 100 倍数 offset 的事件在下一个 step 被
+    //   reset_event_signal() 提前清零, 永远读不到 → 静默丢弃.
+    //   课程数据 (offset 100/200/300/400) 安全; 事件流文件 (dynamic/causal/
+    //   parallel2 类) 实测 82% 事件违约, 在此告警以便生成器对齐.
+    {
+        int aligned = 0;
+        for (const auto& evt : events_)
+            if (evt.step_target % 100 == 0) aligned++;
+        if (aligned != static_cast<int>(events_.size())) {
+            fprintf(stderr, "[EventScheduler] 警告: %d/%zu 事件 step_target 非 100 倍数"
+                    " (launch_modulatory 每 100 步读取, 违约事件将被静默丢弃)\n",
+                    static_cast<int>(events_.size()) - aligned, events_.size());
+        }
+    }
+
     fprintf(stdout, "[EventScheduler] loaded %zu events from %s\n", events_.size(), path.c_str());
     return true;
 }

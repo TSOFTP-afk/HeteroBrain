@@ -52,6 +52,11 @@ void launch_curriculum_readout_init(PersistentBuffers& buf, float init_scale, un
 //   不触碰 mod/tool 权重 — 避免重随机化已加载的 readout 头)
 void launch_curriculum_pad_readout_init(PersistentBuffers& buf, float init_scale, unsigned long long seed);
 
+// Kernel 0c: 浓度 readout 头专用初始化 (2026-08-04 方案2, 仅旧 checkpoint 缺失
+//   浓度节时调用, 只初始化 6×6 浓度头, 不触碰 mod/tool/pad 权重)
+void launch_curriculum_conc_readout_init(PersistentBuffers& buf, float init_scale,
+                                         unsigned long long seed);
+
 // Kernel 1: readout 前向 (调质 logits[6] + 工具 logits[7])
 void launch_curriculum_readout_forward(PersistentBuffers& buf);
 
@@ -90,16 +95,6 @@ void launch_curriculum_readout_forward_frame(PersistentBuffers& buf);
 
 // Kernel 6c (N3F): PAD readout 前向 — 当前帧 bool spike → logits_pad[3]
 void launch_curriculum_pad_forward_frame(PersistentBuffers& buf);
-
-// Kernel 7 (N3F): 课程误差 → 神经元级 eligibility (教学信号注入)
-//   neuron_elig[i] = λ·elig[i] - g·(Σ_m w_mod·W_mod[i,m]·err_mod[m]
-//                                 + Σ_p w_pad·W_pad[i,p]·err_pad[p]
-//                                 + Σ_t w_tool·W_tool[i,t]·err_tool[t])
-//   与 decode_eligibility_update_kernel 同构, 误差源换成课程监督
-//   之后 STDP kernel 读取 neuron_eligibility[post] 调制突触证据 (三因子闭环)
-void launch_curriculum_eligibility_update(PersistentBuffers& buf,
-                                          float decay_factor, float gain,
-                                          float w_mod, float w_tool, float w_pad);
 
 // Kernel 8 (N3F, 2026-08-01 spec §7.1): 具身奖励 → 神经元级 eligibility
 //   neuron_elig[i] = λ·elig[i] + g·reward   (reward ∈ [-1,1])
