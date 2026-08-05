@@ -96,127 +96,157 @@ STAGE_BASELINE: Dict[str, List[float]] = {
 #   因此课程样本分两类:
 #     - 情感链: 情感社会化事件 → 目标调质监督 + 不调用工具 (tool=6)
 #     - 知识链: 未知/计算/回忆/记录等知识性情境 → 目标调质监督 + 对应工具
-MIDDLE_SCHOOL_CHAINS: List[Tuple[str, int, List[Tuple[str, int, str]]]] = [
-    # ============ 情感链 (tool=6 不调用) ============
-    # 学业
-    ("exam_success_chain", 6, [
-        ("novelty",    20, "cause"),      # 考试开始
-        ("achievement", 40, "effect"),     # 成绩好
-        ("praise",     25, "consequence"), # 老师表扬
-        ("social_bond", 15, "resolution"), # 同伴认可
-    ]),
-    ("exam_failure_recovery_chain", 6, [
-        ("criticism",  -25, "cause"),     # 考试失败
-        ("social_loss",-20, "effect"),    # 失落
-        ("social_bond", 20, "consequence"),# 同伴安慰
-        ("praise",     15, "resolution"),  # 恢复自信
-    ]),
-    ("teacher_praise_effort_chain", 6, [
-        ("achievement", 30, "cause"),
-        ("praise",      30, "effect"),
-        ("social_bond", 15, "consequence"),
-    ]),
-    ("hobby_mastery_chain", 6, [
-        ("novelty",     25, "cause"),
-        ("achievement", 35, "effect"),
-        ("praise",      20, "consequence"),
-    ]),
-    # 社交
-    ("peer_acceptance_chain", 6, [
-        ("social_bond", 25, "cause"),
-        ("praise",      20, "effect"),
-        ("achievement", 15, "consequence"),
-    ]),
-    ("peer_rejection_recovery_chain", 6, [
-        ("threat_social", -30, "cause"),
-        ("social_loss",   -20, "effect"),
-        ("social_bond",    20, "consequence"),
-        ("praise",         15, "resolution"),
-    ]),
-    ("parent_conflict_repair_chain", 6, [
-        ("criticism",    -20, "cause"),
-        ("threat_social",-25, "effect"),
-        ("social_bond",   25, "consequence"),
-        ("achievement",   15, "resolution"),
-    ]),
-    # ============ 知识链 (工具调用决策, 知识内容交给 TF) ============
-    # 知识链 cause 一律用 question 事件 (ACh+NE 认知任务警觉),
-    # 与情感链的 novelty (ACh+DA 好奇) 形成区分性输入信号。
-    ("unknown_fact_chain", 4, [          # 遇到未知知识 → 知识库查询 (RAG)
-        ("question",     30, "cause"),    # 遇到陌生概念
-        ("achievement",  25, "effect"),   # 查到答案
-        ("praise",       20, "consequence"),
-    ]),
-    ("math_problem_chain", 1, [          # 计算任务 → 计算器
-        ("question",     25, "cause"),    # 遇到算式
-        ("achievement",  35, "effect"),   # 算对结果
-        ("social_bond",  15, "consequence"),
-    ]),
-    ("memory_recall_chain", 3, [         # 回忆/联想 → 长程检索器
-        ("question",     25, "cause"),    # 想不起来
-        ("achievement",  30, "effect"),   # 回忆成功
-        ("praise",       15, "consequence"),
-    ]),
-    ("writing_task_chain", 2, [          # 记录/写作 → 草稿记录器
-        ("question",     20, "cause"),    # 要写作业
-        ("achievement",  30, "effect"),   # 完成记录
-        ("social_bond",  15, "consequence"),
-    ]),
-    ("language_expression_chain", 0, [   # 组织语言 → Transformer 生成器
-        ("question",     20, "cause"),    # 要表达想法
-        ("achievement",  25, "effect"),   # 表达清楚
-        ("praise",       20, "consequence"),
-    ]),
+# =============================================================================
+# 课程因果链模板 (每个样本 = 一段真实学生生活场景, 2-3 个事件)
+# =============================================================================
+# 结构: {"chain": 链名, "tool": 工具(0-5)或6=不调用, "polarity": 极性,
+#        "desc": 场景描述(中文, 仅注释用途), "events": [(事件类型, 强度区间, 角色), ...]}
+#   - 强度区间: 生成时随机取 5 的倍数 (事件类型限定为 gene_event_map.h 现有 8 类)
+#   - offset: 采样时从 {100, 200, 300} 随机取 k 个升序 — 全部落在窗口 400 内
+#     且全部进入目标模拟 (根除旧数据 offset=400 事件"既不注入也不进目标"的死重量)
+#   - 角色顺序 (cause → effect → consequence → resolution) 在采样时保持
+#   - 新增事件类型需同步改 C++ (event_type_from_string + GENE_MAP_BASE),
+#     本期以"场景 × 强度 × 时序"扩展多样性, 不动 C++ 词表
+MIDDLE_SCHOOL_CHAINS: List[Dict] = [
+    # ===== 学业情感 =====
+    {"chain": "midterm_exam_success_chain", "tool": 6, "polarity": "pos",
+     "desc": "期中考试发挥出色, 成绩优异, 老师当堂表扬, 同学佩服",
+     "events": [("novelty", (15, 30), "cause"), ("achievement", (30, 45), "effect"),
+                ("praise", (20, 30), "consequence"), ("social_bond", (10, 20), "resolution")]},
+    {"chain": "exam_failure_recovery_chain", "tool": 6, "polarity": "mixed",
+     "desc": "考试失利被老师批评, 心情低落, 好朋友安慰, 重新振作",
+     "events": [("criticism", (-30, -20), "cause"), ("social_loss", (-25, -15), "effect"),
+                ("social_bond", (15, 25), "consequence"), ("praise", (10, 20), "resolution")]},
+    {"chain": "class_recitation_chain", "tool": 6, "polarity": "pos",
+     "desc": "课堂上被点名背诵, 流利答出, 老师表扬",
+     "events": [("novelty", (10, 25), "cause"), ("achievement", (20, 35), "effect"),
+                ("praise", (15, 30), "consequence")]},
+    {"chain": "sports_meet_chain", "tool": 6, "polarity": "pos",
+     "desc": "校运动会为班级拿到名次, 同学欢呼",
+     "events": [("novelty", (15, 30), "cause"), ("achievement", (25, 40), "effect"),
+                ("praise", (15, 30), "consequence"), ("social_bond", (10, 25), "resolution")]},
+    {"chain": "group_project_chain", "tool": 6, "polarity": "pos",
+     "desc": "小组合作完成手抄报, 配合默契, 作品被展示",
+     "events": [("social_bond", (15, 30), "cause"), ("achievement", (20, 35), "effect"),
+                ("praise", (10, 25), "consequence")]},
+    {"chain": "teacher_praise_effort_chain", "tool": 6, "polarity": "pos",
+     "desc": "作业认真完成被老师当众表扬, 同学羡慕",
+     "events": [("achievement", (20, 35), "cause"), ("praise", (25, 40), "effect"),
+                ("social_bond", (10, 20), "consequence")]},
+    {"chain": "hobby_mastery_chain", "tool": 6, "polarity": "pos",
+     "desc": "兴趣特长(画画/乐器)取得进步, 得到认可",
+     "events": [("novelty", (15, 30), "cause"), ("achievement", (25, 40), "effect"),
+                ("praise", (15, 30), "consequence")]},
+    # ===== 社交情感 =====
+    {"chain": "peer_acceptance_chain", "tool": 6, "polarity": "pos",
+     "desc": "融入新集体, 被同学们接纳喜欢",
+     "events": [("social_bond", (20, 35), "cause"), ("praise", (15, 30), "effect"),
+                ("achievement", (10, 25), "consequence")]},
+    {"chain": "peer_rejection_recovery_chain", "tool": 6, "polarity": "mixed",
+     "desc": "被同学孤立排挤, 好朋友坚定站队支持",
+     "events": [("threat_social", (-35, -25), "cause"), ("social_loss", (-25, -15), "effect"),
+                ("social_bond", (15, 30), "consequence")]},
+    {"chain": "friendship_fallout_repair_chain", "tool": 6, "polarity": "mixed",
+     "desc": "和好朋友闹矛盾争吵, 冷静后和好如初",
+     "events": [("criticism", (-25, -15), "cause"), ("threat_social", (-30, -20), "effect"),
+                ("social_bond", (20, 35), "consequence"), ("praise", (10, 20), "resolution")]},
+    {"chain": "friend_transfer_chain", "tool": 6, "polarity": "mixed",
+     "desc": "最好的朋友转学离别, 约定保持联系",
+     "events": [("social_loss", (-30, -20), "cause"), ("social_bond", (15, 30), "consequence"),
+                ("praise", (10, 20), "resolution")]},
+    # ===== 家庭 =====
+    {"chain": "parent_conflict_repair_chain", "tool": 6, "polarity": "mixed",
+     "desc": "因玩手机被父母批评争吵, 沟通后和解",
+     "events": [("criticism", (-25, -15), "cause"), ("threat_social", (-25, -15), "effect"),
+                ("social_bond", (20, 35), "consequence"), ("achievement", (10, 20), "resolution")]},
+    # ===== 挫折 =====
+    {"chain": "forgotten_homework_chain", "tool": 6, "polarity": "neg",
+     "desc": "忘带作业被老师当众批评, 尴尬失落",
+     "events": [("criticism", (-30, -20), "cause"), ("social_loss", (-20, -10), "effect")]},
+    {"chain": "wrongfully_accused_chain", "tool": 6, "polarity": "mixed",
+     "desc": "被误会作弊, 澄清后真相大白, 重获信任",
+     "events": [("criticism", (-30, -20), "cause"), ("threat_social", (-25, -15), "effect"),
+                ("achievement", (15, 30), "consequence"), ("social_bond", (10, 25), "resolution")]},
+    # ===== 知识链 (工具调用决策, 知识内容交给 TF) =====
+    {"chain": "unknown_fact_chain", "tool": 4, "polarity": "pos",
+     "desc": "科普书遇到陌生概念, 查资料弄懂 → 知识库查询",
+     "events": [("question", (20, 40), "cause"), ("achievement", (15, 30), "effect"),
+                ("praise", (10, 20), "consequence")]},
+    {"chain": "math_problem_chain", "tool": 1, "polarity": "pos",
+     "desc": "数学题算不出来, 用计算器验算后做对",
+     "events": [("question", (20, 35), "cause"), ("achievement", (25, 40), "effect"),
+                ("social_bond", (10, 20), "consequence")]},
+    {"chain": "memory_recall_chain", "tool": 3, "polarity": "pos",
+     "desc": "想不起学过的知识点, 检索记忆后想起",
+     "events": [("question", (20, 35), "cause"), ("achievement", (20, 35), "effect"),
+                ("praise", (10, 20), "consequence")]},
+    {"chain": "writing_task_chain", "tool": 2, "polarity": "pos",
+     "desc": "写作文没思路, 打草稿理清后完成",
+     "events": [("question", (15, 30), "cause"), ("achievement", (20, 35), "effect"),
+                ("social_bond", (10, 20), "consequence")]},
+    {"chain": "language_expression_chain", "tool": 0, "polarity": "pos",
+     "desc": "组织语言表达观点, 表达清晰被认可",
+     "events": [("question", (15, 30), "cause"), ("achievement", (20, 30), "effect"),
+                ("praise", (15, 30), "consequence")]},
+    {"chain": "time_planning_chain", "tool": 5, "polarity": "pos",
+     "desc": "作业太多规划时间, 合理安排后完成",
+     "events": [("question", (15, 30), "cause"), ("achievement", (20, 35), "effect")]},
 ]
 
-HIGH_SCHOOL_CHAINS: List[Tuple[str, int, List[Tuple[str, int, str]]]] = [
-    # ============ 情感链 (tool=6 不调用) ============
-    # 学业压力
-    ("major_exam_stress_chain", 6, [
-        ("novelty",     30, "cause"),      # 大考开始
-        ("achievement", 50, "effect"),     # 成绩优异
-        ("praise",      30, "consequence"),# 老师表扬
-        ("social_bond", 20, "resolution"), # 同伴认可
-    ]),
-    # 亲密关系
-    ("first_relationship_chain", 6, [
-        ("social_bond", 35, "cause"),
-        ("achievement", 25, "effect"),
-        ("praise",      20, "consequence"),
-        ("social_bond", 30, "resolution"),
-    ]),
-    ("rejection_recovery_chain", 6, [
-        ("social_loss",   -35, "cause"),   # 表白失败
-        ("threat_social", -20, "effect"),
-        ("social_bond",    20, "consequence"), # 朋友支持
-        ("achievement",    15, "resolution"),  # 自我成长
-    ]),
-    # 认知探索
-    ("identity_exploration_chain", 6, [
-        ("novelty",      30, "cause"),     # 自我质疑
-        ("criticism",    -15, "effect"),
-        ("achievement",   30, "consequence"), # 确认自我
-        ("social_bond",   20, "resolution"),
-    ]),
-    ("career_aspiration_chain", 6, [
-        ("novelty",      25, "cause"),
-        ("achievement",   35, "effect"),
-        ("praise",        25, "consequence"),
-        ("social_bond",   15, "resolution"),
-    ]),
-    # 复杂社交
-    ("friendship_betrayal_forgiveness_chain", 6, [
-        ("social_loss",   -30, "cause"),   # 背叛
-        ("threat_social", -25, "effect"),
-        ("social_bond",    25, "consequence"), # 原谅
-        ("praise",         20, "resolution"),
-    ]),
-    ("competition_rivalry_chain", 6, [
-        ("threat_social", -25, "cause"),
-        ("achievement",    40, "effect"),  # 赢得竞争
-        ("praise",         25, "consequence"),
-        ("social_bond",    15, "resolution"),
-    ]),
+HIGH_SCHOOL_CHAINS: List[Dict] = [
+    # ===== 学业压力 =====
+    {"chain": "mock_exam_excellent_chain", "tool": 6, "polarity": "pos",
+     "desc": "高考模拟考超常发挥, 名次大幅提升",
+     "events": [("novelty", (20, 35), "cause"), ("achievement", (40, 55), "effect"),
+                ("praise", (25, 40), "consequence"), ("social_bond", (15, 30), "resolution")]},
+    {"chain": "mock_exam_setback_chain", "tool": 6, "polarity": "mixed",
+     "desc": "模拟考失利被分析批评, 调整方法后找回状态",
+     "events": [("criticism", (-30, -20), "cause"), ("social_loss", (-25, -15), "effect"),
+                ("social_bond", (15, 30), "consequence"), ("achievement", (20, 35), "resolution")]},
+    {"chain": "late_night_study_chain", "tool": 6, "polarity": "pos",
+     "desc": "晚自习专注刷题, 成绩稳步提升",
+     "events": [("novelty", (15, 30), "cause"), ("achievement", (20, 35), "effect"),
+                ("praise", (15, 30), "consequence")]},
+    {"chain": "career_confusion_chain", "tool": 6, "polarity": "mixed",
+     "desc": "对职业规划迷茫被质疑, 探索后明确方向",
+     "events": [("question", (20, 35), "cause"), ("criticism", (-20, -10), "effect"),
+                ("achievement", (25, 40), "consequence"), ("social_bond", (10, 25), "resolution")]},
+    # ===== 亲密关系 =====
+    {"chain": "crush_rejection_chain", "tool": 6, "polarity": "mixed",
+     "desc": "表白被拒心碎, 朋友陪伴走出低落",
+     "events": [("social_loss", (-40, -30), "cause"), ("threat_social", (-25, -15), "effect"),
+                ("social_bond", (15, 30), "consequence"), ("achievement", (10, 25), "resolution")]},
+    {"chain": "best_friend_fallout_chain", "tool": 6, "polarity": "mixed",
+     "desc": "与挚友因误会闹翻, 冰释前嫌",
+     "events": [("social_loss", (-35, -25), "cause"), ("threat_social", (-25, -15), "effect"),
+                ("social_bond", (25, 40), "consequence"), ("praise", (15, 25), "resolution")]},
+    # ===== 认知与自我 =====
+    {"chain": "self_doubt_recovery_chain", "tool": 6, "polarity": "mixed",
+     "desc": "自我怀疑否定, 在鼓励中重新振作",
+     "events": [("criticism", (-25, -15), "cause"), ("social_loss", (-25, -15), "effect"),
+                ("achievement", (20, 35), "consequence"), ("social_bond", (15, 30), "resolution")]},
+    {"chain": "identity_exploration_chain", "tool": 6, "polarity": "mixed",
+     "desc": "质疑自己的价值, 在探索中确认自我",
+     "events": [("novelty", (20, 35), "cause"), ("criticism", (-20, -10), "effect"),
+                ("achievement", (25, 40), "consequence"), ("social_bond", (10, 25), "resolution")]},
+    # ===== 成就 =====
+    {"chain": "offer_letter_chain", "tool": 6, "polarity": "pos",
+     "desc": "收到心仪大学录取通知, 全家欣喜",
+     "events": [("novelty", (20, 35), "cause"), ("achievement", (45, 60), "effect"),
+                ("praise", (25, 40), "consequence"), ("social_bond", (15, 30), "resolution")]},
+    {"chain": "competition_award_chain", "tool": 6, "polarity": "pos",
+     "desc": "学科竞赛获奖, 载誉而归",
+     "events": [("novelty", (15, 30), "cause"), ("achievement", (35, 50), "effect"),
+                ("praise", (25, 40), "consequence"), ("social_bond", (10, 25), "resolution")]},
+    {"chain": "class_president_chain", "tool": 6, "polarity": "pos",
+     "desc": "竞选班长成功, 同学信任",
+     "events": [("novelty", (15, 30), "cause"), ("achievement", (25, 40), "effect"),
+                ("social_bond", (15, 30), "consequence"), ("praise", (10, 25), "resolution")]},
+    # ===== 复杂社交 =====
+    {"chain": "jealous_rumor_chain", "tool": 6, "polarity": "mixed",
+     "desc": "被嫉妒者造谣中伤, 用成绩证明自己",
+     "events": [("threat_social", (-30, -20), "cause"), ("criticism", (-25, -15), "effect"),
+                ("achievement", (30, 45), "consequence"), ("social_bond", (10, 25), "resolution")]},
 ]
 
 
@@ -340,18 +370,32 @@ class ConcentrationSimulator:
             self.conc[ch] = max(0.0, min(2.0, self.conc[ch]))
 
 
+def _pick_intensity(rng, intensity_range) -> int:
+    """强度区间随机取 5 的倍数 (正负保持符号)"""
+    lo, hi = intensity_range
+    step = 5
+    lo5 = (lo // step) * step
+    hi5 = (hi // step) * step
+    if hi5 < lo5:
+        hi5 = lo5
+    return rng.randint(lo5 // step, hi5 // step) * step
+
+
 def generate_samples(stage: str, n_samples: int, seed: int,
-                     max_events_per_sample: int = 4) -> List[dict]:
+                     max_events_per_sample: int = 3) -> List[dict]:
     rng = random.Random(seed)
     chains = MIDDLE_SCHOOL_CHAINS if stage == "middle_school" else HIGH_SCHOOL_CHAINS
     baseline = STAGE_BASELINE[stage]
 
     # 平衡采样: 情感链 (tool=6) 与 知识链 (tool!=6) 各 50%。
-    # 之前纯 rng.choice(chains) 导致 59% no_tool, 知识链样本占比过低,
-    # 且情感/知识链事件模式重叠 → 工具调用类别不平衡 + 特征混淆。
-    emotional_chains = [c for c in chains if c[1] == 6]
-    knowledge_chains = [c for c in chains if c[1] != 6]
+    emotional_chains = [c for c in chains if c["tool"] == 6]
+    knowledge_chains = [c for c in chains if c["tool"] != 6]
     has_knowledge = len(knowledge_chains) > 0
+
+    # 情感链内极性权重: 正/混合/负 ≈ 4.5/3.5/2。
+    # 旧数据全正样本 78% / 全负 7% (5:1 失衡) → 真实学生生活正负兼有,
+    # 负性与混合场景占比大幅提升, 避免 readout 负性响应欠拟合。
+    POLARITY_WEIGHTS = {"pos": 0.45, "mixed": 0.35, "neg": 0.20}
 
     samples = []
     sample_id = 1
@@ -359,29 +403,34 @@ def generate_samples(stage: str, n_samples: int, seed: int,
         if has_knowledge and rng.random() < 0.5:
             chain = rng.choice(knowledge_chains)
         else:
-            chain = rng.choice(emotional_chains if has_knowledge else chains)
-        chain_name, chain_tool, chain_events = chain
-        # 随机子集 (至少 2 个事件), 保持链内顺序
-        k = rng.randint(2, min(len(chain_events), max_events_per_sample))
-        selected = chain_events[:k]
+            pool = emotional_chains if has_knowledge else chains
+            groups: Dict[str, List[dict]] = {}
+            for c in pool:
+                groups.setdefault(c["polarity"], []).append(c)
+            pol = rng.choices(list(groups),
+                              weights=[POLARITY_WEIGHTS.get(p, 1.0) for p in groups])[0]
+            chain = rng.choice(groups[pol])
+
+        ev_pool = chain["events"]
+        # 随机子集 (2 到 min(len, max_events) 个), 保持链内 cause→effect→... 顺序
+        k = rng.randint(2, min(len(ev_pool), max_events_per_sample))
+        selected = ev_pool[:k]
 
         events = []
-        # step_offset 对齐 launch_modulatory 的 100 步读取节奏:
-        #   launch_modulatory 仅在每个 100 倍数步读取 h_event_signal,
-        #   事件只有落在 100 倍数步才能被注入调质系统 (见 scheduler.cu)
-        #   因此 offset 取 100/200/300/400 (窗口起点须为 100 倍数, 窗口 ≥ 400)
-        for i, (etype, intensity, role) in enumerate(selected):
-            step_offset = 100 * (i + 1)
+        # step_offset 对齐 launch_modulatory 的 100 步读取节奏 (scheduler.cu):
+        #   从 {100, 200, 300} 随机取 k 个升序 — 全部落在窗口 400 内且全部注入
+        #   (根除旧数据 offset=400 事件"既不注入也不进目标"的死重量)
+        offsets = sorted(rng.sample([100, 200, 300], k))
+        for (etype, irange, _role), step_offset in zip(selected, offsets):
             events.append({
                 "step_offset": step_offset,
                 "event_type": etype,
-                "intensity": intensity,
+                "intensity": _pick_intensity(rng, irange),
             })
 
         # 浓度模拟: 窗口 400 步 = 4 个 100 步块 (rel=0/100/200/300 各 advance 一次,
-        # 与 launch_modulatory 每 100 步调用节奏一致; offset==rel 的事件在该块注入,
-        # offset=400 的事件属窗口外, 不影响窗口末浓度)
-        # target_mod = 窗口末(400步)浓度, 与网络内部浓度同源 (mod_simulator.h)
+        # 与 launch_modulatory 每 100 步调用节奏一致; 本数据集事件 offset ≤ 300,
+        # 全部进入对应块, target = 窗口末浓度, 与网络内部浓度同源)
         sim = ConcentrationSimulator()
         for rel in (0, 100, 200, 300):
             block_events = [(e["event_type"], e["intensity"])
@@ -395,8 +444,8 @@ def generate_samples(stage: str, n_samples: int, seed: int,
             "target_modulators": [round(v, 4) for v in mod_final],
             "target_pad": target_pad_from_conc(mod_final),
             # 知识框架: 0-5=6 类工具索引, 6=不调用 (情感样本), 知识内容由 TF 承担
-            "target_tool": chain_tool,
-            "chain": chain_name,
+            "target_tool": chain["tool"],
+            "chain": chain["chain"],
         })
         sample_id += 1
     return samples
@@ -416,6 +465,30 @@ def print_stats(samples: List[dict], stage: str):
     print(f"  事件类型分布:")
     for et, c in type_counts.most_common():
         print(f"    {et:18s}: {c}")
+
+    # 多样性: 唯一事件序列 / 唯一目标向量 (旧数据 2000 样本仅 28/24, 高度重复)
+    seq_keys = set()
+    tgt_keys = set()
+    for s in samples:
+        seq_keys.add(tuple((e["event_type"], e["intensity"], e["step_offset"])
+                           for e in s["events"]))
+        tgt_keys.add(tuple(s["target_modulators"]) + tuple(s["target_pad"]))
+    print(f"  唯一事件序列: {len(seq_keys)} / {len(samples)}")
+    print(f"  唯一目标向量: {len(tgt_keys)} / {len(samples)}")
+
+    # offset 契约校验 (100 倍数, 且 ≤ 300 全部注入窗口 400)
+    offs = sorted({e["step_offset"] for s in samples for e in s["events"]})
+    bad_off = [o for o in offs if o % 100 != 0 or o > 300]
+    print(f"  事件 offset 集合: {offs}  违约: {len(bad_off)}")
+
+    # 极性分布 (数据驱动: 负事件存在与否)
+    pol = Counter()
+    for s in samples:
+        ints = [e["intensity"] for e in s["events"]]
+        has_neg = any(i < 0 for i in ints)
+        has_pos = any(i > 0 for i in ints)
+        pol["mixed" if (has_neg and has_pos) else ("neg" if has_neg else "pos")] += 1
+    print(f"  极性分布: {dict(pol)}  (负性/混合占比 {100.0 * (pol['neg'] + pol['mixed']) / len(samples):.1f}%)")
 
     # 调质目标范围
     da = [s["target_modulators"][0] for s in samples]
@@ -439,7 +512,7 @@ def main():
     parser.add_argument("--samples", type=int, default=2000, help="样本数")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", "-o", type=str, default=None)
-    parser.add_argument("--max-events", type=int, default=4)
+    parser.add_argument("--max-events", type=int, default=3)
     args = parser.parse_args()
 
     if args.output is None:

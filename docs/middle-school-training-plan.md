@@ -265,9 +265,9 @@ snn_stage2e_p1.exe `
   ```powershell
   & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 160000 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --learning-rule n3f --bptt-window-size 400 --curriculum-lr 0.0100 --checkpoint-dir checkpoints/middle_1a --checkpoint-interval 10000 --keep-checkpoints 4 --csv build/snn/middle_1a_160k.csv --seed 42 --embodied --embodied-scene hunger_feeding --input-mode byte --text data/smoke_test.txt
   ```
-- **eval 命令模板**（120 样本，`--steps` 必须 > resume 步数）：
+- **eval 命令模板**（120 样本，`--steps` 必须 > resume 步数；**必须带 `--bptt-window-size 400`**，否则窗口 50 步 < 事件 offset 100，事件永不注入，MSE 纯 baseline 失真——2026-08-04 修复）：
   ```powershell
-  & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 141000 --curriculum-eval --curriculum-eval-samples 120 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --checkpoint-dir checkpoints/middle_1a_eval --checkpoint-interval 0 --input-mode byte --text data/smoke_test.txt --seed 42
+  & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 141000 --curriculum-eval --curriculum-eval-samples 120 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --bptt-window-size 400 --checkpoint-dir checkpoints/middle_1a_eval --checkpoint-interval 0 --input-mode byte --text data/smoke_test.txt --seed 42
   ```
 - 训练约 140 ms/步 → 20K ≈ 47 min；120 样本 eval ≈ 13 min
 

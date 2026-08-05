@@ -1,0 +1,16 @@
+{
+  "gene_map_order": ["DA", "ACh", "NE", "5HT", "GABA", "Oxy"],
+  "events": {
+    "novelty":        { "delta": [ 0.15, 0.40, 0.10, 0.00, 0.00, 0.00], "publicity": "private", "authority": "peer",      "temporal": "momentary" },
+    "achievement":    { "delta": [ 0.50, 0.15, 0.20, -0.10, 0.00, 0.05], "publicity": "public",  "authority": "peer",      "temporal": "momentary" },
+    "praise":         { "delta": [ 0.25, 0.10, 0.15, -0.05, 0.00, 0.20], "publicity": "public",  "authority": "authority", "temporal": "momentary" },
+    "social_bond":    { "delta": [ 0.10, 0.05, -0.05, 0.05, 0.05, 0.35], "publicity": "public",  "authority": "peer",      "temporal": "sustained" },
+    "question":       { "delta": [ 0.10, 0.45, 0.45, 0.05, 0.05, 0.05], "publicity": "private", "authority": "peer",      "temporal": "momentary" },
+    "threat_social":  { "delta": [-0.15, 0.20, 0.45, 0.35, 0.05, -0.10], "publicity": "public",  "authority": "authority", "temporal": "momentary" },
+    "social_loss":    { "delta": [-0.15, 0.00, 0.10, 0.30, 0.00, -0.25], "publicity": "public",  "authority": "peer",      "temporal": "sustained" },
+    "criticism":      { "delta": [-0.10, 0.05, 0.20, 0.25, 0.00, -0.15], "publicity": "public",  "authority": "authority", "temporal": "momentary" },
+    "food_tasty":     { "delta": [ 0.40, 0.10, 0.05, -0.05, 0.00, 0.02], "publicity": "private", "authority": "peer",      "temporal": "momentary" },
+    "food_bland":     { "delta": [ 0.05, 0.00, 0.00, 0.00, 0.00, 0.00], "publicity": "private", "authority": "peer",      "temporal": "momentary" },
+    "threat_physical":{ "delta": [-0.20, 0.30, 0.60, 0.40, 0.10, -0.05], "publicity": "private", "authority": "authority", "temporal": "momentary" }
+  }
+}
