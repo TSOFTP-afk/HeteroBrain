@@ -18,7 +18,7 @@ VITA is not just another Transformer LLM, nor a pure SNN research project. It is
 | 子系统 / Subsystem | 职责 / Role | 实现 / Implementation |
 |---|---|---|
 | **SNN 情感核心** / Affective core | 情感动力学（6 维调质）、记忆（WM/海马）、意图、调度 / Affective dynamics (6-channel modulation), memory (WM/hippocampus), intent, scheduling | 自研 CUDA SNN：联合皮层 50K + 前额叶 5K + 运动皮层（60K 神经元 / 10.7M 突触 / 31 种生物机制） |
-| **LLM 语言皮层** / Language cortex | 语言理解与生成、世界知识 / Language understanding, generation, world knowledge | llama.cpp + Qwen3-4B（INT4 GGUF，2.5GB）；MiniCPM5-1B 已弃用 |
+| **LLM 语言皮层** / Language cortex | 语言理解与生成、世界知识 / Language understanding, generation, world knowledge | llama.cpp + **Qwen3-4B**（INT4 GGUF，2.5GB，当前默认）；此前曾用 **MiniCPM5-1B**（历史模型，已弃用） |
 | **Bridge 桥接层** / Bridge | 情感→调制信号（文字通道 + logit_bias + 采样参数）、对话→SNN 输入 / Affect → modulation signals; dialogue → SNN input | affective_mapping / emotion_bridge / snn_feedback |
 
 **当前核心工程事实**（2026-08-06 深夜）：readout 根因已修复——事件直通联合皮层注入通道（事件→固定子区域，与文本流并行）已交付，事件信号进入网络内部（事件子区域 ratio>2，nz 全激活）。110K 训练 + 120 样本 eval 判据达标：mod MSE 0.0383（历史最优，90K 0.184 ↓79%）。生物拟真模块 M1-M4（杏仁核/HPA 皮质醇/脑岛/VTA-DA）已交付，详见 [docs/bio-plausible-modules-spec.md](docs/bio-plausible-modules-spec.md)。
