@@ -93,7 +93,7 @@ flowchart TB
 | 事件→皮层注入 / Event→cortex channel | ✅ | 事件直通联合皮层固定子区域（11×4545），ratio>2，事件信号进入网络内部 |
 | 生物拟真模块 / Bio modules M1-M4 | ✅ | 杏仁核情感学习 / HPA 皮质醇慢轴 / 脑岛内感受 / VTA-DA 奖赏环路（见 spec 文档） |
 | **110K 训练 + eval 判据** / 110K training & eval | ✅ | mod MSE 0.0383（历史最优）；事件可辨性多数类型 ratio>2；decode acc 38.8% |
-| 情绪涌现诊断 / Emergence diagnostics | 🔬 进行中 | `--eval-emergent`：L1 事件扩散 / L2 readout 权重分布 / L3 模式效价区分度 |
+| 情绪涌现诊断 / Emergence diagnostics | ✅ 已诊断 | `--eval-emergent` 120 样本：L1 事件扩散 4/9 类 ratio>2（social_bond 3.35 / question 3.88）；L2 readout 权重均匀（CV=0.008）；L3 Fisher=0.383（皮层模式尚未涌现情绪编码） |
 
 **当前训练配置**：N3F 在线学习 + `--curriculum-continuous` + `--bptt-window-size 400` + `--embodied hunger_feeding`，checkpoint：`checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e`。浓度饱和已修复（AMYGDALA_DA/NE_MOD 0.25→0.08、EVENT_CORTEX_GAIN 12→6）。
 
@@ -199,8 +199,8 @@ vita/
 
 - [x] **事件→联合皮层注入通道**（✅ 已交付）：事件直通联合皮层固定子区域，readout 有可学信号，SNN 内部涌现情感编码
   **Event→association-cortex injection channel** (✅ delivered): direct event input to fixed cortical sub-regions so the readout has learnable signal and affect emerges inside the network.
-- [ ] **情绪涌现诊断与验证**（进行中）：`--eval-emergent` 三级证据——事件信息扩散 / readout 权重分布 / 皮层模式效价区分度
-  **Emotion-emergence diagnostics** (in progress): three-level evidence — event-info spread / readout weight distribution / cortical pattern valence discriminability.
+- [x] **情绪涌现诊断与验证**（✅ 已诊断）：`--eval-emergent` 三级证据——事件信息扩散 / readout 权重分布 / 皮层模式效价区分度。结论：事件信号已进网络（L1 部分类型 ratio>2），readout 为分布式均匀权重（L2 CV=0.008），皮层模式情绪区分度未涌现（L3 Fisher=0.383）——readout 靠全局发放水平拟合浓度，情绪编码尚未长进皮层模式
+  **Emotion-emergence diagnostics** (✅ done): three-level evidence — event-info spread / readout weight distribution / cortical pattern valence discriminability. Conclusion: event signals do enter the network (L1 ratio>2 for several types), the readout uses distributed uniform weights (L2 CV=0.008), and cortical valence discriminability has not emerged (L3 Fisher=0.383) — the readout fits concentrations from global firing levels, valence coding has not yet grown into cortical patterns.
 - [ ] **浓度→发放即时调制**：调质浓度直接改变神经元兴奋性（神经调质生理角色），情感存在于网络内部
   **Concentration→firing modulation**: neuromodulators directly alter neuron excitability — affect lives inside the network.
 - [ ] **双输入接口**：`inject_world`（LLM 理解转化器→事件→皮层）+ `inject_dialogue`（对话→神经签名）
