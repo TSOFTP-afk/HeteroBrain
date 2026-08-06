@@ -349,7 +349,7 @@ BioMechanismScheduler::BioMechanismScheduler(MemoryAllocator* alloc)
       d_p3_column_byte_responses_(nullptr),
       d_gate_states_(nullptr), d_byte_history_(nullptr), d_gate_stats_(nullptr),
       gate_mean_(GATE_INITIAL_SIGNAL), gate_open_ratio_(0.0f) {
-    printf("[Stage2e P1] 调度器初始化完成\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 调度器初始化完成\n");
     memset(&stats_, 0, sizeof(stats_));
     // 分配 device 端 spike 计数器
     CUDA_CHECK_2E(cudaMalloc(&d_spike_counter_, 2 * sizeof(int)));
@@ -436,8 +436,9 @@ BioMechanismScheduler::BioMechanismScheduler(MemoryAllocator* alloc)
 
 BioMechanismScheduler::~BioMechanismScheduler() {
     shutdown_bptt();
-    printf("[Stage2e P1] 调度器销毁, 共执行 %d 步, 累计脉冲 %d\n",
-           total_steps_, total_spikes_accum_);
+    if (!g_silent_mode)
+        printf("[Stage2e P1] 调度器销毁, 共执行 %d 步, 累计脉冲 %d\n",
+               total_steps_, total_spikes_accum_);
     if (d_spike_counter_) cudaFree(d_spike_counter_);
     if (d_p3_column_spikes_) cudaFree(d_p3_column_spikes_);
     if (d_p3_kwta_stats_) cudaFree(d_p3_kwta_stats_);

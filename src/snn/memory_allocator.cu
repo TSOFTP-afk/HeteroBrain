@@ -24,19 +24,22 @@ T* MemoryAllocator::alloc(size_t count, const char* name, size_t* accum_bytes) {
     *accum_bytes += bytes;
     vram_used_ += bytes;
     if (vram_used_ > vram_peak_) vram_peak_ = vram_used_;
-    printf("  [+]. %-32s %10zu × %2zuB = %8.2f MB (累计 %7.2f MB)\n",
-           name, count, sizeof(T), bytes / (1024.0 * 1024.0),
-           vram_used_ / (1024.0 * 1024.0));
+    if (!g_silent_mode)
+        printf("  [+]. %-32s %10zu × %2zuB = %8.2f MB (累计 %7.2f MB)\n",
+               name, count, sizeof(T), bytes / (1024.0 * 1024.0),
+               vram_used_ / (1024.0 * 1024.0));
     return ptr;
 }
 
 size_t MemoryAllocator::allocate_all() {
     allocation_failed_ = false;
-    printf("[Stage2e P0] 开始分配 GPU 显存...\n");
-    printf("  %-34s %10s %8s %10s %10s\n",
-           "Buffer", "Count", "Size", "Bytes", "Total MB");
-    printf("  %-34s %10s %8s %10s %10s\n",
-           "------", "-----", "----", "-----", "--------");
+    if (!g_silent_mode) {
+        printf("[Stage2e P0] 开始分配 GPU 显存...\n");
+        printf("  %-34s %10s %8s %10s %10s\n",
+               "Buffer", "Count", "Size", "Bytes", "Total MB");
+        printf("  %-34s %10s %8s %10s %10s\n",
+               "------", "-----", "----", "-----", "--------");
+    }
 
     size_t total = 0;
 
@@ -224,14 +227,16 @@ size_t MemoryAllocator::allocate_all() {
     d_bufs_.d_vta_input     = alloc<float>(N_VTA_NEURONS, "d_vta_input", &total);
     d_bufs_.d_vta_accum     = alloc<unsigned int>(2, "d_vta_accum", &total);
 
-    printf("  %-34s %10s %8s %10s %10s\n",
-           "------", "-----", "----", "-----", "--------");
-    printf("[Stage2e P0] 持久显存分配完成: %.2f MB (%.2f GB)\n",
-           vram_used_ / (1024.0 * 1024.0),
-           vram_used_ / (1024.0 * 1024.0 * 1024.0));
-    printf("[Stage2e P0] v4 设计目标: 1242 MB, 实际: %.2f MB, 偏差: %+.2f MB\n",
-           vram_used_ / (1024.0 * 1024.0),
-           vram_used_ / (1024.0 * 1024.0) - 1242.0);
+    if (!g_silent_mode) {
+        printf("  %-34s %10s %8s %10s %10s\n",
+               "------", "-----", "----", "-----", "--------");
+        printf("[Stage2e P0] 持久显存分配完成: %.2f MB (%.2f GB)\n",
+               vram_used_ / (1024.0 * 1024.0),
+               vram_used_ / (1024.0 * 1024.0 * 1024.0));
+        printf("[Stage2e P0] v4 设计目标: 1242 MB, 实际: %.2f MB, 偏差: %+.2f MB\n",
+               vram_used_ / (1024.0 * 1024.0),
+               vram_used_ / (1024.0 * 1024.0) - 1242.0);
+    }
 
     if (allocation_failed_) {
         fprintf(stderr, "[Stage2e P0] 一个或多个持久缓冲分配失败\n");
@@ -243,8 +248,9 @@ size_t MemoryAllocator::allocate_all() {
 void MemoryAllocator::free_all() {
     if (vram_used_ == 0) return;
 
-    printf("[Stage2e P0] 释放 GPU 显存 (%.2f MB)...\n",
-           vram_used_ / (1024.0 * 1024.0));
+    if (!g_silent_mode)
+        printf("[Stage2e P0] 释放 GPU 显存 (%.2f MB)...\n",
+               vram_used_ / (1024.0 * 1024.0));
 
     #define FREE_PTR(p) do { if (p) { cudaFree(p); p = nullptr; } } while(0)
 

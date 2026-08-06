@@ -24,6 +24,7 @@
 
 #include "http_server.h"            // OpenAI 兼容 serve 模式
 #include "mini_json.h"
+#include "awakening.h"              // VITA 数字生命苏醒动画（原生启动）
 
 namespace vita {
 namespace engine {
@@ -124,6 +125,8 @@ EmotionEngine::EmotionEngine(Options opt) : opt_(std::move(opt)) {
                 prop.totalGlobalMem / (1024.0 * 1024.0));
 
     // ---- 2. SNN 初始化 (resume: 拓扑随 checkpoint 恢复, 跳过 init_network) ----
+    // 引擎启动走静默模式: 隐藏 SNN 内部诊断日志 (显存分配/调度器初始化/文本加载统计)
+    stage2e::set_silent_mode(true);
     snn_ = new SnnState();
     snn_->allocator = new stage2e::MemoryAllocator(
         static_cast<std::size_t>(opt_.memory_budget_mb) * 1024ULL * 1024ULL);
@@ -195,6 +198,10 @@ EmotionEngine::EmotionEngine(Options opt) : opt_(std::move(opt)) {
     std::printf("[engine] ready. 调制更新间隔=%d 步 (~%.1fs), 每轮训练推进=%d 步\n",
                 opt_.mod_update_interval, opt_.mod_update_interval * 0.14,
                 opt_.steps_per_turn);
+
+    // ---- 5. 数字生命苏醒动画（原生启动体验）----
+    // 硬件/SNN/LLM 全部就绪后播放：硅基核心 boot → 数据 → 生命 → VITA ONLINE
+    awakening::play_awakening();
 }
 
 EmotionEngine::~EmotionEngine() {

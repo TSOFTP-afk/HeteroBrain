@@ -502,11 +502,11 @@ int init_synapses(BioSynapse* d_synapses,
     std::vector<float> h_alpha;
     std::vector<float> h_beta;
 
-    printf("[Stage2e P1] 生成突触拓扑 (host 端, ~10.7M 突触)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 生成突触拓扑 (host 端, ~10.7M 突触)...\n");
     init_synapses_host(h_syn, h_row, h_col, h_w, h_d, h_alpha, h_beta, psw_evidence_total, seed);
 
     int n_syn = static_cast<int>(h_syn.size());
-    printf("[Stage2e P1] 实际生成: %d 突触, %d row_ptr 项\n", n_syn, static_cast<int>(h_row.size()));
+    if (!g_silent_mode) printf("[Stage2e P1] 实际生成: %d 突触, %d row_ptr 项\n", n_syn, static_cast<int>(h_row.size()));
 
     // 上传 GPU
     CUDA_CHECK_2E(cudaMemcpy(d_synapses, h_syn.data(),
@@ -531,7 +531,7 @@ int init_synapses(BioSynapse* d_synapses,
     CUDA_CHECK_2E(cudaMemcpy(d_synapse_beta, h_beta.data(),
                               n_syn * sizeof(float),
                               cudaMemcpyHostToDevice));
-    printf("[Stage2e P1] 突触拓扑已上传 GPU\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 突触拓扑已上传 GPU\n");
     return n_syn;
 }
 
@@ -768,14 +768,14 @@ void init_buffers_zero(MemoryAllocator* alloc) {
 // Host: 完整初始化入口
 // -----------------------------------------------------------------------------
 void init_network(MemoryAllocator* alloc, float psw_evidence_total, uint32_t seed) {
-    printf("[Stage2e P1] === 网络初始化 ===\n");
+    if (!g_silent_mode) printf("[Stage2e P1] === 网络初始化 ===\n");
 
     PersistentBuffers& b = alloc->buffers();
 
-    printf("[Stage2e P1] 初始化神经元 (60K AdEx 静息)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化神经元 (60K AdEx 静息)...\n");
     init_neurons(b.d_neurons);
 
-    printf("[Stage2e P1] 初始化突触拓扑 + 延迟 + STP + 调质受体 + PSW...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化突触拓扑 + 延迟 + STP + 调质受体 + PSW...\n");
     int n_syn = init_synapses(b.d_synapses, b.d_csr_row_ptr, b.d_csr_col_idx,
                               b.d_weights_cache, b.d_synapse_delay,
                                b.d_synapse_alpha, b.d_synapse_beta,
@@ -784,16 +784,16 @@ void init_network(MemoryAllocator* alloc, float psw_evidence_total, uint32_t see
         fprintf(stderr, "[Stage2e P1 WARN] 突触数 %d != 目标 %d\n", n_syn, N_TOTAL_SYNAPSES_2E);
     }
 
-    printf("[Stage2e P1] 初始化缓冲为零...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化缓冲为零...\n");
     init_buffers_zero(alloc);
 
     // -----------------------------------------------------------------
     // 语言运动皮层初始化 (在现有网络初始化之后)
     // -----------------------------------------------------------------
-    printf("[Stage2e P1] 初始化运动皮层神经元 (5K AdEx 静息, region=MOTOR)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化运动皮层神经元 (5K AdEx 静息, region=MOTOR)...\n");
     init_motor_neurons(b.d_motor_neurons);
 
-    printf("[Stage2e P1] 生成 L5 → 运动皮层稀疏 CSR 突触 (250K 突触)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 生成 L5 → 运动皮层稀疏 CSR 突触 (250K 突触)...\n");
     int n_l5_motor_syn = init_l5_to_motor_synapses(b.d_l5_to_motor_synapses,
                                                    b.d_l5_to_motor_weights,
                                                    b.d_l5_to_motor_csr_row_ptr,
@@ -806,30 +806,31 @@ void init_network(MemoryAllocator* alloc, float psw_evidence_total, uint32_t see
     }
 
     // 零初始化解码权重矩阵 (虽然 alloc 已清零, 显式 memset 强调语义: 解码器从零权重起步)
-    printf("[Stage2e P1] 零初始化解码权重矩阵 (60K × 256 = %.2f MB)...\n",
-           (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float) / (1024.0 * 1024.0));
+    if (!g_silent_mode)
+        printf("[Stage2e P1] 零初始化解码权重矩阵 (60K × 256 = %.2f MB)...\n",
+               (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float) / (1024.0 * 1024.0));
     CUDA_CHECK_2E(cudaMemset(b.d_decode_weights, 0,
                               (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float)));
 
     // -----------------------------------------------------------------
     // 杏仁核情感学习核心 (Phase 3a-F, M1): 状态清零 + 权重随机初始化
     // -----------------------------------------------------------------
-    printf("[Stage2e P1] 初始化杏仁核 LA/BA (500×500 STDP 权重)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化杏仁核 LA/BA (500×500 STDP 权重)...\n");
     init_amygdala(alloc, seed);
 
     // -----------------------------------------------------------------
     // 脑岛内感受模块 (Phase 3a-H, M4): 状态清零 (无学习权重)
     // -----------------------------------------------------------------
-    printf("[Stage2e P1] 初始化脑岛内感受 (5 维 × 200 LIF)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化脑岛内感受 (5 维 × 200 LIF)...\n");
     init_insula(alloc);
 
     // -----------------------------------------------------------------
     // VTA-DA 模块 (Phase 3a-I, M2): 状态清零 (无学习权重)
     // -----------------------------------------------------------------
-    printf("[Stage2e P1] 初始化 VTA-DA RPE 群体 (正/负各 500 LIF)...\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 初始化 VTA-DA RPE 群体 (正/负各 500 LIF)...\n");
     init_vta(alloc);
 
-    printf("[Stage2e P1] 网络初始化完成\n");
+    if (!g_silent_mode) printf("[Stage2e P1] 网络初始化完成\n");
 }
 
 } // namespace stage2e

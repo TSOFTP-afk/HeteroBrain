@@ -32,6 +32,10 @@
 
 namespace stage2e {
 
+// 全局日志静默开关 (定义点): 见 config.h 声明。默认 false = 输出完整诊断日志。
+bool g_silent_mode = false;
+void set_silent_mode(bool on) { g_silent_mode = on; }
+
 // 全局文本流缓冲 (host 端, main.cpp 启动时加载一次)
 static std::string g_text_buffer;
 static size_t g_text_pos = 0;
@@ -44,8 +48,9 @@ static int g_input_inject_interval = 3;
 
 void set_input_inject_interval(int interval) {
     g_input_inject_interval = interval > 0 ? interval : 1;
-    printf("[TextStream] 注入间隔 = %d 步/字节 (每段 400 步注入 %d 字节)\n",
-           g_input_inject_interval, 400 / g_input_inject_interval);
+    if (!g_silent_mode)
+        printf("[TextStream] 注入间隔 = %d 步/字节 (每段 400 步注入 %d 字节)\n",
+               g_input_inject_interval, 400 / g_input_inject_interval);
 }
 
 // 加载 UTF-8 文本语料到全局缓冲
@@ -85,7 +90,7 @@ size_t load_text_corpus(const char* filepath) {
     }
     g_text_fingerprint = fingerprint;
 
-    // 统计字节分布 (诊断用)
+    // 统计字节分布 (诊断用, 静默模式下跳过全部统计打印)
     int ascii_count = 0, head_count = 0, cont_count = 0;
     for (unsigned char c : g_text_buffer) {
         if (c < 0x80) ascii_count++;
@@ -93,23 +98,38 @@ size_t load_text_corpus(const char* filepath) {
         else if (c >= 0x80 && c < 0xC0) cont_count++;
     }
 
-    std::cout << "[TextStream] 加载 " << filepath << ": "
-              << raw.size() << " 原始字节 -> "
-              << g_text_buffer.size() << " 过滤字节" << std::endl;
-    std::cout << "  ASCII (<0x80):    " << ascii_count << " ("
-              << 100.0 * ascii_count / g_text_buffer.size() << "%)" << std::endl;
-    std::cout << "  UTF-8 头字节:      " << head_count << " ("
-              << 100.0 * head_count / g_text_buffer.size() << "%)" << std::endl;
-    std::cout << "  UTF-8 续字节:      " << cont_count << " ("
-              << 100.0 * cont_count / g_text_buffer.size() << "%)" << std::endl;
-    std::cout << "  文本预览 (前 80 字节): ";
-    for (size_t i = 0; i < 80 && i < g_text_buffer.size(); ++i) {
-        unsigned char c = (unsigned char)g_text_buffer[i];
-        if (c >= 0x20 && c < 0x7F) std::cout << (char)c;
-        else if (c == ' ') std::cout << ' ';
-        else std::cout << '?';
+    if (!g_silent_mode) {
+        std::cout << "[TextStream] 加载 " << filepath << ": "
+                  << raw.size() << " 原始字节 -> "
+                  << g_text_buffer.size() << " 过滤字节" << std::endl;
+        std::cout << "  ASCII (<0x80):    " << ascii_count << " ("
+                  << 100.0 * ascii_count / g_text_buffer.size() << "%)" << std::endl;
+        std::cout << "  UTF-8 头字节:      " << head_count << " ("
+                  << 100.0 * head_count / g_text_buffer.size() << "%)" << std::endl;
+        std::cout << "  UTF-8 续字节:      " << cont_count << " ("
+                  << 100.0 * cont_count / g_text_buffer.size() << "%)" << std::endl;
+        std::cout << "  文本预览 (前 80 字符): ";
+        // 按 UTF-8 解码输出, 中文直接显示 (控制台为 UTF-8 代码页)。
+        // 以字符计数(非字节), 避免在 80 字节处截断多字节序列。
+        size_t shown = 0;
+        for (size_t i = 0; i < g_text_buffer.size() && shown < 80; ++i) {
+            unsigned char c = (unsigned char)g_text_buffer[i];
+            if (c == ' ') { std::cout << ' '; ++shown; continue; }
+            int len = 1;
+            if (c >= 0xF0) len = 4;        // 4 字节 (增补平面)
+            else if (c >= 0xE0) len = 3;   // 3 字节 (中文)
+            else if (c >= 0xC0) len = 2;   // 2 字节
+            if (i + len <= g_text_buffer.size()) {
+                for (int k = 0; k < len; ++k) std::cout << (char)g_text_buffer[i + k];
+                i += len - 1;
+                ++shown;
+            } else {
+                std::cout << '?';          // 尾部残缺序列
+                ++shown;
+            }
+        }
+        std::cout << std::endl;
     }
-    std::cout << std::endl;
 
     return g_text_buffer.size();
 }

@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <string>
 
 #ifdef _WIN32
@@ -65,6 +66,19 @@ void print_usage(const char* argv0) {
 }
 
 }  // namespace
+
+// 交互选择运行模式 (在启动动画之后): 1=对话模式, 2=HTTP 服务
+// 仅当未用 --serve 强制指定时调用; 非法输入回退到对话模式
+static int select_run_mode() {
+    std::printf("\n选择运行模式 / Select mode:\n");
+    std::printf("  1) 对话模式 (Interactive chat)\n");
+    std::printf("  2) HTTP 服务 (OpenAI-compatible serve)\n");
+    std::printf("> ");
+    std::fflush(stdout);
+    std::string line;
+    std::getline(std::cin, line);
+    return (line == "2") ? 2 : 1;
+}
 
 int main(int argc, char** argv) {
     setup_console_utf8();
@@ -120,7 +134,13 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[main] engine initialization failed\n");
         return 1;
     }
+    // 动画已在引擎构造中播放 (初始化完成后)。
+    // 若未用 --serve 强制指定，则在动画之后交互选择运行模式。
     if (opt.serve) {
+        return engine.run_serve();
+    }
+    const int mode = select_run_mode();
+    if (mode == 2) {
         return engine.run_serve();
     }
     return engine.run();
