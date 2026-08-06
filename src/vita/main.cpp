@@ -61,7 +61,11 @@ void print_usage(const char* argv0) {
         "ablation (消融实验, 验证 SNN 真实作用):\n"
         "  --ablate-prompt          冻结情感 prompt 文字为中性 (只留采样参数通道)\n"
         "  --ablate-sampler         冻结采样参数为默认值 (只留情绪文字通道)\n"
-        "  --ablate-all             两者同时冻结 (无 SNN 影响的对照基线)\n",
+        "  --ablate-all             两者同时冻结 (无 SNN 影响的对照基线)\n"
+        "\n"
+        "discrimination (判别实验, 2026-08-07):\n"
+        "  --emotion-force <mood>    强制把 SNN 情感状态覆盖为饱和值 (sad|happy|neutral),\n"
+        "                            用于构造同一输入下仅数值通道极性不同的干净对照\n",
         argv0);
 }
 
@@ -118,6 +122,8 @@ int main(int argc, char** argv) {
         } else if (std::strcmp(argv[i], "--ablate-all") == 0) {
             opt.ablate_prompt = true;
             opt.ablate_sampler = true;
+        } else if (std::strcmp(argv[i], "--emotion-force") == 0 && i + 1 < argc) {
+            opt.emotion_force = argv[++i];
         } else {
             print_usage(argv[0]);
             return 2;

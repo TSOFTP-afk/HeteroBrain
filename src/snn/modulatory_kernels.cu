@@ -313,14 +313,15 @@ void reset_event_signal() {
 void set_event_signal(const float modulator_delta[6], int duration_steps) {
     for (int i = 0; i < 6; ++i) {
         float v = modulator_delta[i];
-        // 单事件 delta 先 clamp 到 [-1, 1]
-        if (v < -1.0f) v = -1.0f;
-        if (v > 1.0f) v = 1.0f;
+        // 单事件 delta 先 clamp 到 [-0.4, 0.4] (2026-08-07 压缩量级: 原 ±1.0 会让强情绪
+        //   单条文本直接把调制物推到 clamp 上限, 丧失动态范围; 压缩后衰减重新主导)
+        if (v < -0.4f) v = -0.4f;
+        if (v > 0.4f) v = 0.4f;
         // 累加 (非覆盖)
         h_event_signal[i] += v;
-        // 叠加后 clamp 到 [-1.5, 1.5] (允许 2-3 事件叠加超调, 但防止爆炸)
-        if (h_event_signal[i] < -1.5f) h_event_signal[i] = -1.5f;
-        if (h_event_signal[i] > 1.5f) h_event_signal[i] = 1.5f;
+        // 叠加后 clamp 到 [-0.75, 0.75] (允许 2 事件叠加, 但防止爆炸)
+        if (h_event_signal[i] < -0.75f) h_event_signal[i] = -0.75f;
+        if (h_event_signal[i] > 0.75f) h_event_signal[i] = 0.75f;
     }
     // duration 取最大值 (长持续时间事件不应被短事件截断)
     if (duration_steps > h_event_duration_steps) {

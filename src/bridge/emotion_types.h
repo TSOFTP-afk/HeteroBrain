@@ -96,6 +96,25 @@ struct MappingConfig {
     float repeat_penalty_max = 2.0f;
 };
 
+// -----------------------------------------------------------------------------
+// RawEmotion — LLM 语义情感抽取的输出契约 (词典→LLM 固定两遍流水线的第二遍)
+// -----------------------------------------------------------------------------
+// 设计: LLM 只做"语义分类" (它擅长的), 输出情绪/态度类别 + 强度 + 置信度;
+//       数值映射 (类别→6 维调质增量) 仍由 emotion_event.cpp 的确定性基准表完成,
+//       保证数值可测、可复现, 与关键词词典共用同一套增量语义。
+// 类别枚举 (与 emotion_event.cpp 的 canonical 基准表下标一一对应):
+//   emotion: 0=neutral 1=happy 2=sad 3=angry 4=fear 5=calm 6=empathy 7=surprise
+//   attitude: 0=neutral 1=praise 2=criticism 3=threat 4=bond
+// -----------------------------------------------------------------------------
+struct RawEmotion {
+    int   emotion = 0;             // 情绪类别 (见上)
+    float emotion_intensity = 0.0f; // [0,1] 情绪强度
+    int   attitude = 0;             // 态度类别 (见上)
+    float attitude_intensity = 0.0f;// [0,1] 态度强度
+    float confidence = 0.0f;        // [0,1] 语义置信度 (混合权重)
+    bool  ok = false;               // 解析成功且模型给出有效语义
+};
+
 }  // namespace bridge
 }  // namespace vita
 

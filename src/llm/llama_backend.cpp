@@ -11,6 +11,7 @@
 #include "llama_backend.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -484,6 +485,214 @@ int LlamaBackend::generate(const std::string& prompt, std::string& response) {
         std::fprintf(stderr, "[llm] logit_bias: %zu token 偏置, 采样命中 %d/%d\n",
                      bias_.size(), bias_hits, n_gen);
     }
+    return 0;
+}
+
+// -----------------------------------------------------------------------------
+// 情感抽取: 贪心短生成 + JSON 解析
+// -----------------------------------------------------------------------------
+
+// 贪心短生成: 复用 generate() 的 tokenize/分段 decode/采样循环骨架, 但使用独立
+// 贪心采样器 (llama_sampler_init_greedy), 不触碰 smpl_/params_/bias_ (情感调制
+// 采样器链), 生成至多 max_tokens 个 token。返回 0 或负错误码 (同 generate)。
+int LlamaBackend::generate_fixed(const std::string& prompt, std::string& response,
+                                 int max_tokens) {
+    if (!is_loaded()) {
+        return -1;
+    }
+    const bool is_first = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) == -1;
+    const int n_prompt = -llama_tokenize(vocab_, prompt.c_str(), prompt.size(),
+                                         nullptr, 0, is_first, true);
+    if (n_prompt <= 0) {
+        return -3;
+    }
+    std::vector<llama_token> tokens(static_cast<size_t>(n_prompt));
+    if (llama_tokenize(vocab_, prompt.c_str(), prompt.size(),
+                       tokens.data(), tokens.size(), is_first, true) < 0) {
+        return -3;
+    }
+    {
+        int pos = 0;
+        while (pos < n_prompt) {
+            const int n_tok = std::min(opt_.n_batch, n_prompt - pos);
+            llama_batch b = llama_batch_get_one(tokens.data() + pos, n_tok);
+            if (llama_decode(ctx_, b) != 0) {
+                return -5;
+            }
+            pos += n_tok;
+        }
+    }
+
+    llama_sampler* greedy = llama_sampler_init_greedy();
+    response.clear();
+    int n_gen = 0;
+    llama_token feed = 0;
+    bool need_decode = false;
+    while (n_gen < max_tokens) {
+        const int n_used = llama_memory_seq_pos_max(llama_get_memory(ctx_), 0) + 1;
+        if (n_used + 1 > llama_n_ctx(ctx_)) {
+            llama_sampler_free(greedy);
+            return -4;
+        }
+        if (need_decode) {
+            llama_batch b = llama_batch_get_one(&feed, 1);
+            if (llama_decode(ctx_, b) != 0) {
+                llama_sampler_free(greedy);
+                return -5;
+            }
+        }
+        llama_token id = llama_sampler_sample(greedy, ctx_, -1);
+        if (llama_vocab_is_eog(vocab_, id)) {
+            char tbuf[64];
+            const int tn = llama_token_to_piece(vocab_, id, tbuf, sizeof(tbuf), 0, true);
+            if (tn > 0 && std::string(tbuf, tn).find("think") != std::string::npos) {
+                feed = id;
+                need_decode = true;
+                ++n_gen;
+                continue;
+            }
+            break;
+        }
+        char buf[256];
+        const int n = llama_token_to_piece(vocab_, id, buf, sizeof(buf), 0, true);
+        if (n < 0) {
+            llama_sampler_free(greedy);
+            return -6;
+        }
+        response.append(buf, static_cast<size_t>(n));
+        feed = id;
+        need_decode = true;
+        ++n_gen;
+    }
+    llama_sampler_free(greedy);
+    return 0;
+}
+
+namespace {
+
+// 从 JSON 文本中提取指定 key 的字符串值 (仅匹配 "key":"..." 或 "key": "...").
+static bool json_str(const char* s, const char* key, std::string& val) {
+    const std::string k = std::string("\"") + key + "\"";
+    const char* p = std::strstr(s, k.c_str());
+    while (p) {
+        const char* q = p + k.size();
+        while (*q == ' ' || *q == '\t') ++q;
+        if (*q == ':') {
+            ++q;
+            while (*q == ' ' || *q == '\t') ++q;
+            if (*q == '"') {
+                ++q;
+                std::string out;
+                while (*q && *q != '"') {
+                    if (*q == '\\' && q[1]) ++q;
+                    out.push_back(*q++);
+                }
+                val = out;
+                return true;
+            }
+        }
+        p = std::strstr(p + 1, k.c_str());
+    }
+    return false;
+}
+
+// 从 JSON 文本中提取指定 key 的数值。
+static bool json_num(const char* s, const char* key, float& val) {
+    const std::string k = std::string("\"") + key + "\"";
+    const char* p = std::strstr(s, k.c_str());
+    while (p) {
+        const char* q = p + k.size();
+        while (*q == ' ' || *q == '\t') ++q;
+        if (*q == ':') {
+            ++q;
+            while (*q == ' ' || *q == '\t') ++q;
+            char* end = nullptr;
+            const float v = std::strtof(q, &end);
+            if (end != q) {
+                val = v;
+                return true;
+            }
+        }
+        p = std::strstr(p + 1, k.c_str());
+    }
+    return false;
+}
+
+// 字符串类别 → 情绪类别下标 (与 emotion_types.h RawEmotion 枚举一致; 未知→0)
+int parse_emotion_cat(const std::string& s) {
+    if (s == "happy") return 1;
+    if (s == "sad") return 2;
+    if (s == "angry") return 3;
+    if (s == "fear" || s == "anxious") return 4;
+    if (s == "calm") return 5;
+    if (s == "empathy") return 6;
+    if (s == "surprise") return 7;
+    return 0;  // neutral / 未知
+}
+
+// 字符串类别 → 态度类别下标 (未知→0)
+int parse_attitude_cat(const std::string& s) {
+    if (s == "praise") return 1;
+    if (s == "criticism") return 2;
+    if (s == "threat") return 3;
+    if (s == "bond") return 4;
+    return 0;  // neutral / 未知
+}
+
+}  // namespace
+
+int LlamaBackend::extract_emotion(const std::string& text, const std::string& dict_hint,
+                                  bridge::RawEmotion& out) {
+    out = bridge::RawEmotion{};
+    if (!is_loaded()) {
+        return -1;
+    }
+    static const char* kPromptFmt =
+        "你是一个情感分析器。只分析下面这条消息中：说话人自身的情绪类别及强度，"
+        "以及说话人对助手的态度的类别及强度。只输出一个 JSON 对象，不要输出任何其它文字或解释。\n"
+        "情绪枚举: happy(开心) sad(难过) angry(生气) fear(害怕焦虑) calm(平静) "
+        "empathy(共情心疼) surprise(惊讶) neutral(中性)\n"
+        "态度枚举: praise(赞赏感谢) criticism(批评否定) threat(攻击厌恶) bond(需要依恋) neutral(中性)\n"
+        "输出格式: {\"emotion\":\"happy\",\"emotion_intensity\":0.8,\"attitude\":\"praise\","
+        "\"attitude_intensity\":0.6,\"confidence\":0.9}\n"
+        "词典先行判定(仅供参考，顶级语义请以本条消息真实含义为准，词典可能被表面词误导): %s\n"
+        "消息：%s\n";
+    const std::string hint = dict_hint.empty() ? "无" : dict_hint;
+    char* prompt = nullptr;
+    {
+        const int len = std::snprintf(nullptr, 0, kPromptFmt, hint.c_str(), text.c_str());
+        if (len < 0) {
+            return -1;
+        }
+        prompt = new char[static_cast<size_t>(len) + 1];
+        std::snprintf(prompt, static_cast<size_t>(len) + 1, kPromptFmt, hint.c_str(), text.c_str());
+    }
+    std::string resp;
+    const int rc = generate_fixed(prompt, resp, 96);
+    delete[] prompt;
+    if (rc != 0) {
+        return rc;
+    }
+    if (resp.empty()) {
+        return -1;
+    }
+
+    std::string emo, att;
+    float emo_i = 0.0f, att_i = 0.0f, conf = 0.0f;
+    if (!json_str(resp.c_str(), "emotion", emo)) {
+        return -1;
+    }
+    json_str(resp.c_str(), "attitude", att);
+    json_num(resp.c_str(), "emotion_intensity", emo_i);
+    json_num(resp.c_str(), "attitude_intensity", att_i);
+    json_num(resp.c_str(), "confidence", conf);
+
+    out.emotion = parse_emotion_cat(emo);
+    out.emotion_intensity = emo_i < 0.0f ? 0.0f : (emo_i > 1.0f ? 1.0f : emo_i);
+    out.attitude = parse_attitude_cat(att);
+    out.attitude_intensity = att_i < 0.0f ? 0.0f : (att_i > 1.0f ? 1.0f : att_i);
+    out.confidence = conf < 0.0f ? 0.0f : (conf > 1.0f ? 1.0f : conf);
+    out.ok = true;
     return 0;
 }
 

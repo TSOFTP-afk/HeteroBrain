@@ -989,7 +989,14 @@ void BioMechanismScheduler::launch_modulatory(int step) {
     }
 
     // 调质浓度动力学
-    float kl_div = 0.0f;  // P2 简化: NE 暂不触发
+    // NE 警觉通道 (Phase 3a, 2026-08-07): 用在线解码预测误差驱动警觉。
+    //   预测误差 > 均匀基线 (1.0) → 网络对当前输入意外/不确定 → NE↑ 警觉。
+    //   (接入主循环: 误差由调度器每调制窗口实测, 不再硬编码 0)
+    float kl_div = 0.0f;
+    if (prediction_error_norm > 1.0f) {
+        kl_div = (prediction_error_norm - 1.0f) * 2.0f;   // 1.0→0, 1.414→0.83
+        if (kl_div > 1.0f) kl_div = 1.0f;
+    }
     const float* stage_baseline =
         curriculum_baseline_active_ ? curriculum_baseline_mod_ : nullptr;
     // Phase 3a-F (M1): 杏仁核 BA 窗口累计 → 调质偏置 (正性→DA↑, 负性→NE↑)

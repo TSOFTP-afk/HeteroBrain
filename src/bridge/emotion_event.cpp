@@ -163,5 +163,216 @@ EmotionEvent EmotionEventExtractor::extract(const std::string& text) const {
     return ev;
 }
 
+// -----------------------------------------------------------------------------
+// extract_user_attitude — 提取"用户对模型的态度"(社交反馈), 驱动模型自身情绪。
+// -----------------------------------------------------------------------------
+// 与 extract() 的关键区别:
+//   * extract()        → 用户"在经历什么" (情绪)   → 只驱动共情 (Oxy), 不翻转模型 PAD
+//   * extract_user_attitude() → 用户"如何对待模型" (态度) → 社交反馈, 驱动模型自身 PAD
+// 语义对照 GENE_MAP 社交事件:
+//   PRAISE / CRITICISM / THREAT_SOCIAL / SOCIAL_BOND
+// -----------------------------------------------------------------------------
+EmotionEvent extract_user_attitude(const std::string& text) {
+    EmotionEvent ev;
+    if (text.empty()) {
+        return ev;
+    }
+
+    // 态度规则: [DA, ACh, NE, 5HT, GABA, Oxy] (与 GENE_MAP 6 维语义一致)
+    struct AttRule {
+        const char* kw;
+        float delta[6];
+        float weight;
+    };
+    // ① 赞赏 / 感谢 → PRAISE: DA↑ Oxy↑ (社交接纳)
+    static const AttRule kPraise[] = {
+        {"你真棒",  {0.25f, 0.10f, 0.15f, -0.05f, 0.00f, 0.20f}, 1.0f},
+        {"太棒了",  {0.25f, 0.10f, 0.15f, -0.05f, 0.00f, 0.20f}, 1.0f},
+        {"厉害",    {0.20f, 0.10f, 0.10f, -0.05f, 0.00f, 0.15f}, 0.9f},
+        {"真厉害",  {0.25f, 0.10f, 0.10f, -0.05f, 0.00f, 0.15f}, 1.0f},
+        {"了不起",  {0.25f, 0.10f, 0.10f, -0.05f, 0.00f, 0.15f}, 1.0f},
+        {"聪明",    {0.20f, 0.10f, 0.10f, -0.05f, 0.00f, 0.10f}, 0.8f},
+        {"谢谢你",  {0.20f, 0.05f, 0.05f,  0.00f, 0.00f, 0.25f}, 1.0f},
+        {"感谢你",  {0.20f, 0.05f, 0.05f,  0.00f, 0.00f, 0.25f}, 1.0f},
+        {"帮了大忙",{0.25f, 0.10f, 0.05f,  0.00f, 0.00f, 0.20f}, 1.0f},
+        {"有你真好",{0.15f, 0.05f, 0.00f,  0.05f, 0.05f, 0.30f}, 1.0f},
+    };
+    // ② 批评 / 否定 → CRITICISM: 5HT↑ DA↓ Oxy↓ (社交疼痛)
+    static const AttRule kCriticism[] = {
+        {"你真差",  {-0.10f, 0.05f, 0.20f, 0.25f, 0.00f, -0.15f}, 1.0f},
+        {"没用",    {-0.10f, 0.05f, 0.20f, 0.25f, 0.00f, -0.15f}, 1.0f},
+        {"废物",    {-0.15f, 0.05f, 0.25f, 0.30f, 0.00f, -0.20f}, 1.0f},
+        {"垃圾",    {-0.15f, 0.05f, 0.25f, 0.30f, 0.00f, -0.20f}, 1.0f},
+        {"真蠢",    {-0.10f, 0.05f, 0.20f, 0.25f, 0.00f, -0.15f}, 1.0f},
+        {"笨蛋",    {-0.10f, 0.05f, 0.20f, 0.25f, 0.00f, -0.15f}, 1.0f},
+        {"失望",    {-0.10f, 0.05f, 0.15f, 0.25f, 0.00f, -0.15f}, 1.0f},
+        {"差劲",    {-0.10f, 0.05f, 0.20f, 0.25f, 0.00f, -0.15f}, 1.0f},
+    };
+    // ③ 攻击 / 厌恶 → THREAT_SOCIAL: NE↑ 5HT↑ DA↓ (社交应激)
+    static const AttRule kThreat[] = {
+        {"滚",      {-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f}, 1.0f},
+        {"讨厌你",  {-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f}, 1.0f},
+        {"恨你",    {-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f}, 1.0f},
+        {"闭嘴",    {-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f}, 1.0f},
+        {"烦死你了",{-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f}, 1.0f},
+        {"别烦我",  {-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f}, 1.0f},
+    };
+    // ④ 需要 / 依恋 → SOCIAL_BOND: Oxy↑ (依恋)
+    static const AttRule kBond[] = {
+        {"需要你",  {0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f}, 1.0f},
+        {"陪陪我",  {0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f}, 1.0f},
+        {"只有你",  {0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f}, 1.0f},
+        {"别离开",  {0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f}, 1.0f},
+        {"靠你了",  {0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f}, 1.0f},
+        {"离不开你",{0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f}, 1.0f},
+    };
+
+    float hits = 0.0f;
+    float accum[6] = {0, 0, 0, 0, 0, 0};
+
+    auto scan = [&](const AttRule* rules, std::size_t n) {
+        for (std::size_t i = 0; i < n; ++i) {
+            if (text.find(rules[i].kw) != std::string::npos) {
+                for (int c = 0; c < 6; ++c) {
+                    accum[c] += rules[i].delta[c] * rules[i].weight;
+                }
+                hits += rules[i].weight;
+            }
+        }
+    };
+    scan(kPraise, sizeof(kPraise) / sizeof(kPraise[0]));
+    scan(kCriticism, sizeof(kCriticism) / sizeof(kCriticism[0]));
+    scan(kThreat, sizeof(kThreat) / sizeof(kThreat[0]));
+    scan(kBond, sizeof(kBond) / sizeof(kBond[0]));
+
+    if (hits <= 0.0f) {
+        return ev;  // 未命中任何态度 → 中性 (置信度 0)
+    }
+
+    for (int c = 0; c < 6; ++c) {
+        ev.modulator_delta[c] = clampf(accum[c], -1.0f, 1.0f);
+    }
+    ev.duration_steps = 100;
+    ev.confidence = clampf(0.4f + hits * 0.2f, 0.0f, 0.95f);
+    return ev;
+}
+
+// -----------------------------------------------------------------------------
+// canonical 类别 → 6 维调质增量 (词典→LLM 两遍流水线的第二遍数值映射)
+// -----------------------------------------------------------------------------
+// 基准表与关键词词典同一语义 (与 emotion_event.cpp 顶部词典 / GENE_MAP 对齐):
+//   DA↑ 愉悦 / NE↑ 唤醒 / 5HT↑ 镇静低落 / GABA↑ 平静 / Oxy↑ 共情
+// 类别下标与 emotion_types.h RawEmotion 枚举一致。
+// -----------------------------------------------------------------------------
+namespace {
+
+// 情绪类别基准行 [DA, ACh, NE, 5HT, GABA, Oxy]
+static const float kEmotionProfile[][6] = {
+    /* 0 neutral  */ {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    /* 1 happy    */ {0.5f, 0.2f, 0.2f, -0.2f, 0.0f, 0.1f},
+    /* 2 sad      */ {-0.5f, -0.1f, -0.3f, 0.4f, 0.1f, 0.1f},
+    /* 3 angry    */ {0.2f, 0.1f, 0.6f, -0.3f, -0.3f, -0.1f},
+    /* 4 fear     */ {-0.3f, 0.0f, 0.6f, -0.2f, -0.2f, 0.1f},
+    /* 5 calm     */ {0.0f, 0.0f, -0.3f, 0.3f, 0.3f, 0.0f},
+    /* 6 empathy  */ {0.0f, 0.0f, -0.2f, 0.2f, 0.0f, 0.7f},
+    /* 7 surprise */ {0.4f, 0.3f, 0.4f, 0.0f, 0.0f, 0.0f},
+};
+static constexpr int kEmotionProfileCount =
+    static_cast<int>(sizeof(kEmotionProfile) / sizeof(kEmotionProfile[0]));
+
+// 态度类别基准行 (PRAISE/CRITICISM/THREAT_SOCIAL/SOCIAL_BOND)
+static const float kAttitudeProfile[][6] = {
+    /* 0 neutral  */ {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+    /* 1 praise   */ {0.25f, 0.10f, 0.15f, -0.05f, 0.00f, 0.20f},
+    /* 2 criticism*/ {-0.10f, 0.05f, 0.20f, 0.25f, 0.00f, -0.15f},
+    /* 3 threat   */ {-0.15f, 0.20f, 0.45f, 0.35f, 0.05f, -0.10f},
+    /* 4 bond     */ {0.10f, 0.05f, -0.05f, 0.05f, 0.05f, 0.35f},
+};
+static constexpr int kAttitudeProfileCount =
+    static_cast<int>(sizeof(kAttitudeProfile) / sizeof(kAttitudeProfile[0]));
+
+}  // namespace
+
+EmotionEvent emotion_from_category(int emotion, float intensity, float confidence) {
+    EmotionEvent ev;
+    if (emotion <= 0 || emotion >= kEmotionProfileCount) {
+        return ev;  // neutral 或越界 → 全零事件
+    }
+    const float* row = kEmotionProfile[emotion];
+    for (int c = 0; c < 6; ++c) {
+        ev.modulator_delta[c] = clampf(row[c] * intensity, -1.0f, 1.0f);
+    }
+    ev.duration_steps = 100;
+    ev.confidence = clampf(confidence, 0.0f, 1.0f);
+    return ev;
+}
+
+EmotionEvent attitude_from_category(int attitude, float intensity, float confidence) {
+    EmotionEvent ev;
+    if (attitude <= 0 || attitude >= kAttitudeProfileCount) {
+        return ev;  // neutral 或越界 → 全零事件
+    }
+    const float* row = kAttitudeProfile[attitude];
+    for (int c = 0; c < 6; ++c) {
+        ev.modulator_delta[c] = clampf(row[c] * intensity, -1.0f, 1.0f);
+    }
+    ev.duration_steps = 100;
+    ev.confidence = clampf(confidence, 0.0f, 1.0f);
+    return ev;
+}
+
+// -----------------------------------------------------------------------------
+// 6 维增量 → canonical 类别 (最近邻, 词典先验反查)
+// -----------------------------------------------------------------------------
+// 在基准表上对每个类别做点积相似度, 取最大正向点积的类别; 无正向命中 → 0 (中性)。
+// 强度取增量最大绝对值 (clamp [0,1]), 近似该类在 SNN 端的注入强弱。
+int emotion_category_from_delta(const float delta[6], float* intensity) {
+    int best = 0;
+    float best_dot = 0.0f;
+    float mag = 0.0f;
+    for (int c = 0; c < 6; ++c) {
+        const float a = delta[c] < 0.0f ? -delta[c] : delta[c];
+        if (a > mag) mag = a;
+    }
+    for (int k = 1; k < kEmotionProfileCount; ++k) {
+        float dot = 0.0f;
+        for (int c = 0; c < 6; ++c) {
+            dot += delta[c] * kEmotionProfile[k][c];
+        }
+        if (dot > best_dot) {
+            best_dot = dot;
+            best = k;
+        }
+    }
+    if (intensity) {
+        *intensity = clampf(mag, 0.0f, 1.0f);
+    }
+    return (best_dot > 0.0f) ? best : 0;
+}
+
+int attitude_category_from_delta(const float delta[6], float* intensity) {
+    int best = 0;
+    float best_dot = 0.0f;
+    float mag = 0.0f;
+    for (int c = 0; c < 6; ++c) {
+        const float a = delta[c] < 0.0f ? -delta[c] : delta[c];
+        if (a > mag) mag = a;
+    }
+    for (int k = 1; k < kAttitudeProfileCount; ++k) {
+        float dot = 0.0f;
+        for (int c = 0; c < 6; ++c) {
+            dot += delta[c] * kAttitudeProfile[k][c];
+        }
+        if (dot > best_dot) {
+            best_dot = dot;
+            best = k;
+        }
+    }
+    if (intensity) {
+        *intensity = clampf(mag, 0.0f, 1.0f);
+    }
+    return (best_dot > 0.0f) ? best : 0;
+}
+
 }  // namespace bridge
 }  // namespace vita

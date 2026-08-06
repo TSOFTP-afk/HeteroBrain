@@ -79,6 +79,13 @@ public:
         last_event_duration = duration;
         ++event_calls;
     }
+    void emit_other_emotion(const float d[6], int duration,
+                            const char* text, int text_len) override {
+        std::memcpy(last_other_delta, d, sizeof(last_other_delta));
+        last_other_duration = duration;
+        last_other_text.assign(text, text_len);
+        ++other_calls;
+    }
     void emit_embodied_reward(float reward) override {
         last_reward = reward;
         ++reward_calls;
@@ -94,6 +101,10 @@ public:
     float last_event_delta[6] = {0, 0, 0, 0, 0, 0};
     int   last_event_duration = 0;
     int   event_calls = 0;
+    float last_other_delta[6] = {0, 0, 0, 0, 0, 0};
+    int   last_other_duration = 0;
+    std::string last_other_text;
+    int   other_calls = 0;
     float last_reward = 0.0f;
     int   reward_calls = 0;
     int   last_world_type = -1;
@@ -282,8 +293,19 @@ void test_bridge_process_turn() {
     const int rc = bridge.process_turn("user", "我今天很难过");
     CHECK(rc == 0, "bridge: process_turn 成功");
     CHECK(backend.last_user == "我今天很难过", "bridge: user 回合回调");
-    CHECK(sink.event_calls == 1, "bridge: 情感事件注入 SNN");
-    CHECK(sink.last_event_delta[0] < 0.0f, "bridge: 事件 DA- 透传");
+    // 2026-08-07 边界重设计: 用户情绪 → 共情 + 他人情绪弱泄入, 不注入模型自身 PAD。
+    CHECK(sink.event_calls == 0, "bridge: 用户情绪不注入模型 PAD");
+    CHECK(sink.empathy_levels.size() == 1, "bridge: 用户情绪触发共情");
+    CHECK(sink.empathy_levels.back() > 0.0f, "bridge: 共情水平 > 0");
+    CHECK(sink.other_calls == 1, "bridge: 用户情绪触发他人情绪弱泄入");
+    CHECK(sink.last_other_delta[5] > 0.0f, "bridge: 他人情绪 Oxy 主 (关怀)");
+    CHECK(sink.last_other_text == "我今天很难过", "bridge: 他人情绪附原文");
+
+    // 用户态度 (社交反馈) → 注入模型自身调制物
+    sink.event_calls = 0;
+    bridge.process_turn("user", "你真棒，帮了我大忙");
+    CHECK(sink.event_calls == 1, "bridge: 用户赞赏注入模型 PAD");
+    CHECK(sink.last_event_delta[0] > 0.0f, "bridge: 赞赏 DA+ 透传");
     CHECK(sink.last_event_duration == 100, "bridge: 事件持续窗口");
 
     // 无情感词 → 仅回回合回调, 不注入事件

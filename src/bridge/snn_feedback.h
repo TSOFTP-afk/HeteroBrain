@@ -24,6 +24,13 @@ public:
     // (duration_steps: 0=单次脉冲, >0=plateau 型每 100 步递减)
     virtual void emit_event(const float modulator_delta[6], int duration_steps) = 0;
 
+    // 他人情绪弱泄入 (2026-08-07 边界重设计): 用户情绪 → 以较小的增益泄入 SNN,
+    //   让模型"感知到"用户在经历某种情绪, 但自我 PAD 不被拉到用户值 (可感知但不同步)。
+    // 与 emit_event 的区别: emit_event 驱动模型自身情绪 (社交反馈); 本通道是"他者"镜像,
+    //   增量已按他人增益缩放 (Oxy 主 + 微 5HT/NE), 并附带文本用于工作台 OTHER 标签。
+    virtual void emit_other_emotion(const float weak_delta[6], int duration_steps,
+                                    const char* text, int text_len) = 0;
+
     // 世界事件 (事件类型, 强度) → SNN 事件通道 (Phase 3a-G, 2026-08-06):
     //   事件类型直通 SNN — 杏仁核 LA 注入 (M1) + 联合皮层子区域注入 (A),
     //   强度 [-50, 50] 线性缩放。不做语义转换 (LLM 理解转化器属后续 spec);

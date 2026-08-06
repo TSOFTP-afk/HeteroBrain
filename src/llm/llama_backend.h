@@ -70,6 +70,13 @@ public:
     void on_user_turn(const std::string& user_text) override;
     void on_assistant_turn(const std::string& assistant_text) override;
 
+    // 语义情感抽取 (词典→LLM 串联流水线的 LLM 语义裁决, 2026-08-07): 对一段文本
+    // 做一次贪心短生成, 输出语义类别 JSON (见 extract_emotion), 解析为 RawEmotion。
+    // dict_hint 为词典先验 (可空), 注入 prompt 供模型参照做语义裁决。
+    // 单独使用贪心采样器, 不扰动情感调制采样器链 (smpl_/params_/bias_ 保持不变)。
+    int extract_emotion(const std::string& text, const std::string& dict_hint,
+                        bridge::RawEmotion& out) override;
+
     // ---- llama 特定扩展 ----
     // 执行一轮完整对话: user_text 作为用户输入, 生成助手回复写入 response。
     // 生成前自动注入: 情感 system prompt + 历史消息 + 当前用户消息 (chat template)。
@@ -118,6 +125,10 @@ private:
     // 给定完整 ChatML prompt (已含 system + 历史 + assistant 头), 执行
     // tokenize + 分段 decode + 采样循环。返回 0 或负错误码 (同 chat)
     int generate(const std::string& prompt, std::string& response);
+
+    // 贪心短生成 (情感抽取用): 不触碰 smpl_/params_/bias_, 用独立贪心采样器,
+    // 生成至多 max_tokens 个 token (越界/EOG 即停)。返回 0 或负错误码 (同 generate)
+    int generate_fixed(const std::string& prompt, std::string& response, int max_tokens);
 
     Options               opt_;
     llama_model*          model_ = nullptr;

@@ -97,6 +97,9 @@ flowchart TB
 | **110K 训练 + eval 判据** / 110K training & eval | ✅ | mod MSE 0.0383（历史最优）；事件可辨性多数类型 ratio>2；decode acc 38.8% |
 | 情绪涌现诊断 / Emergence diagnostics | ✅ 已诊断 | `--eval-emergent` 120 样本：L1 事件扩散 4/9 类 ratio>2（social_bond 3.35 / question 3.88）；L2 readout 权重均匀（CV=0.008）；L3 Fisher=0.383（皮层模式尚未涌现情绪编码） |
 
+**判别实验**（2026-08-07）：证明 SNN 对 LLM 的干预是真实质变而非 LLM"表演情绪"。两组对照**完全关闭文字通道**（`--ablate-prompt` 冻结情感 prompt 为中性），仅用 `--emotion-force` 把情绪给到满（`sad` / `happy`），同一中性输入 + 长文输出。即便模型看不到任何情绪文字，饱和悲伤把温度推到 1.00、饱和快乐保持 0.80，输出风格呈现可观测差异（悲伤克制审慎 / 快乐生动饱满）——干预由 SNN 数值通道真实承载。详见 [docs/emotion-discrimination-experiment-2026-08-07.md](docs/emotion-discrimination-experiment-2026-08-07.md)。
+**Discrimination experiment** (2026-08-07): proves the SNN's influence on the LLM is a real qualitative change, not the LLM "acting affect". Two controlled runs fully froze the text channel (`--ablate-prompt`), drove affect to saturation via `--emotion-force` (`sad`/`happy`), and used the same neutral input with long outputs. Even with no affective text visible to the model, saturated sadness pushed temperature to 1.00 vs 0.80 for happiness, producing observable stylistic differences (sad = restrained/cautious; happy = vivid/positive) — the intervention is genuinely carried by the SNN's numeric channel. See [docs/emotion-discrimination-experiment-2026-08-07.md](docs/emotion-discrimination-experiment-2026-08-07.md).
+
 **当前训练配置**：N3F 在线学习 + `--curriculum-continuous` + `--bptt-window-size 400` + `--embodied hunger_feeding`，checkpoint：`checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e`。浓度饱和已修复（AMYGDALA_DA/NE_MOD 0.25→0.08、EVENT_CORTEX_GAIN 12→6）。
 
 **Current training config**: N3F online learning + `--curriculum-continuous` + `--bptt-window-size 400` + `--embodied hunger_feeding`; checkpoint: `checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e`. Concentration saturation fixed (AMYGDALA_DA/NE_MOD 0.25→0.08, EVENT_CORTEX_GAIN 12→6).

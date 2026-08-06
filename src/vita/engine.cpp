@@ -48,11 +48,31 @@ class SnnSink final : public bridge::SnnFeedbackSink {
 public:
     // Phase 3a-G (C): 世界事件注入需要 scheduler (杏仁核 LA 注入 + 联合皮层子区域注入)
     void set_scheduler(stage2e::BioMechanismScheduler* s) { scheduler_ = s; }
+    // 2026-08-07: 他人情绪弱泄入需要写工作台 OTHER 标签 → 需 allocator 访问槽位
+    void set_allocator(stage2e::MemoryAllocator* a) { alloc_ = a; }
     void emit_empathy(float level) override {
         stage2e::set_empathy_signal(level);
     }
     void emit_event(const float modulator_delta[6], int duration_steps) override {
         stage2e::set_event_signal(modulator_delta, duration_steps);
+    }
+    // 他人情绪弱泄入 (2026-08-07 边界重设计):
+    //   ① 弱增益调制注入 (Oxy 主 + 微 5HT/NE) — 让 SNN"感知到"但仍与自我区分。
+    //   ② 写工作台 OTHER 标签槽 — LLM 能读出"SNN 感知到用户情绪 (他人)"。
+    void emit_other_emotion(const float weak_delta[6], int duration_steps,
+                            const char* text, int text_len) override {
+        stage2e::set_event_signal(weak_delta, duration_steps);
+        if (alloc_) {
+            auto& buf = alloc_->buffers();
+            if (buf.d_wb_slots) {
+                const int idx = stage2e::find_wb_write_slot(buf.d_wb_slots, WB_CAPACITY);
+                if (idx >= 0) {
+                    stage2e::launch_wb_text_write(
+                        buf.d_wb_slots, idx, text, text_len,
+                        (uint8_t)SlotTag::OTHER, 0, wb_step_);
+                }
+            }
+        }
     }
     // Phase 3a-G: 世界事件直通 SNN — 杏仁核 LA 注入 (M1) + 事件→联合皮层注入 (A),
     //   与浓度通道 (emit_event) 并列; 事件类型语义见 src/snn/event_types.h
@@ -65,9 +85,17 @@ public:
     void emit_embodied_reward(float reward) override {
         stage2e::set_embodied_reward(reward);
     }
+    // 供引擎每轮更新工作台写入时间戳 (当前 SNN step)
+    void set_wb_step(int step) { wb_step_ = step; }
 private:
     stage2e::BioMechanismScheduler* scheduler_ = nullptr;
+    stage2e::MemoryAllocator* alloc_ = nullptr;
+    int wb_step_ = 0;
 };
+
+// 引擎级单例反馈端 (2026-08-07): 提到命名空间作用域, 构造接线 + 主循环均需访问
+//   (设置工作台时间戳 / 注册 allocator), 局部 static 无法从 snn_and_mood 更新。
+static SnnSink g_snn_sink;
 
 // AffectiveState (SNN 读出) → EmotionState (桥接层契约), 字段一一对应
 bridge::EmotionState to_emotion_state(const stage2e::AffectiveState& a) {
@@ -100,6 +128,7 @@ const char* slot_tag_name(uint8_t tag) {
         case SlotTag::HYPOTHESIS: return "假设";
         case SlotTag::SCRATCH:    return "草稿";
         case SlotTag::ANCHOR:     return "锚点";
+        case SlotTag::OTHER:      return "他人情绪";
         default:                  return "空";
     }
 }
@@ -118,6 +147,36 @@ std::string error_json(const std::string& code, const std::string& msg) {
 // 消融实验: 冻结情感文字时使用的中性基调 (对照基线, 不随 SNN 状态变化)
 const char* kNeutralEmotionPrompt =
     "你的情绪基调：平静、平稳、中立。你的共情倾向：中。";
+
+// 判别实验 (--emotion-force, 2026-08-07): 构造饱和 EmotionState。
+// 让 PAD 与 6 维调质浓度偏离到饱和极性, 使 compute_logit_bias /
+// compute_sampler_params 产生最大可观测差异, 构造"仅数值通道极性不同"的对照。
+bridge::EmotionState forced_saturated(const std::string& mood) {
+    bridge::EmotionState s = bridge::EmotionState::neutral();
+    if (mood == "sad") {
+        s.pleasure        = -1.0f;   // 负愉悦 → 难过/伤心/低落 高偏置
+        s.arousal         = -1.0f;   // 低唤醒 → 平静/放松
+        s.dominance       = -1.0f;   // 低主导 → 犹豫
+        s.dopamine        = 0.0f;    // DA 低 → 沮丧
+        s.serotonin       = 0.0f;    // 5HT 低 → 焦虑/不安
+        s.gaba            = 2.0f;    // GABA 高 → 放松
+        s.oxytocin        = 0.0f;    // Oxy 低 → 冷漠
+        s.temperature_delta = 0.2f;  // 5HT低→+0.3, GABA高→-0.1 → 温度略升
+        s.repetition_delta  = 0.2f;  // 高重复惩罚
+    } else {  // "happy"
+        s.pleasure        = 1.0f;    // 正愉悦 → 开心/喜欢/微笑/美好
+        s.arousal         = 0.8f;    // 高唤醒 → 兴奋/激动
+        s.dominance       = 0.8f;    // 高主导 → 自信
+        s.dopamine        = 2.0f;    // DA 高 → 快乐
+        s.serotonin       = 2.0f;
+        s.norepinephrine  = 1.2f;    // NE 略高 → 紧张(轻微)
+        s.gaba            = 0.0f;
+        s.oxytocin        = 2.0f;    // Oxy 高 → 亲切/信任
+        s.temperature_delta = 0.0f;  // DA高→+0.3, 5HT高→-0.3 → 净0
+        s.repetition_delta  = 0.0f;
+    }
+    return s;
+}
 
 }  // namespace
 
@@ -204,9 +263,10 @@ EmotionEngine::EmotionEngine(Options opt) : opt_(std::move(opt)) {
 
     // ---- 4. 桥接层接线 ----
     bridge_.attach_backend(llm_.get());
-    static SnnSink snn_sink;   // SNN 侧无生命周期问题 (仅转发到全局 setter)
-    snn_sink.set_scheduler(snn_->scheduler);   // Phase 3a-G (C): 世界事件注入
-    bridge_.attach_snn_feedback(&snn_sink);
+    g_snn_sink.set_scheduler(snn_->scheduler);   // Phase 3a-G (C): 世界事件注入
+    g_snn_sink.set_allocator(snn_->allocator);   // 2026-08-07: 他人情绪写工作台 OTHER 标签
+    g_snn_sink.set_wb_step(step_);
+    bridge_.attach_snn_feedback(&g_snn_sink);
     bridge_.attach_emotion_extractor(&extractor_);
 
     ready_ = true;
@@ -304,6 +364,7 @@ void EmotionEngine::snn_and_mood(const std::string& user_msg) {
     }
 
     // ① LLM→SNN: 事件抽取 → 调质注入
+    g_snn_sink.set_wb_step(step_);   // 2026-08-07: 他人情绪写工作台的时间戳指向当前步
     bridge_.process_turn("user", user_msg);
 
     // ② 训练推进 (在线学习): STDP + 调制链路演化
@@ -328,7 +389,17 @@ void EmotionEngine::snn_and_mood(const std::string& user_msg) {
     // ③ SNN→LLM: 读取情感 → 桥接层调制 (两条独立通道, 消融开关可分别冻结)
     const stage2e::AffectiveState aff =
         stage2e::get_affective_state(s->allocator, step_);
-    bridge_.set_state(to_emotion_state(aff));
+    bridge::EmotionState emo = to_emotion_state(aff);
+    // 判别实验 (--emotion-force): 覆盖 SNN 实际读出, 强制注入饱和情绪,
+    // 构造"同一输入 + 文字通道冻结 + 仅数值通道极性不同"的干净对照。
+    if (opt_.emotion_force == "sad") {
+        emo = forced_saturated("sad");
+    } else if (opt_.emotion_force == "happy") {
+        emo = forced_saturated("happy");
+    } else if (opt_.emotion_force == "neutral") {
+        emo = bridge::EmotionState::neutral();
+    }
+    bridge_.set_state(emo);
 
     //   数值通道: 采样参数 (模型不可见, 直接改 llama 采样分布)
     //   文字通道: 情感 system prompt (模型可见, 语义引导)

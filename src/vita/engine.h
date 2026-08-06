@@ -50,6 +50,11 @@ public:
         //   --ablate-all  = 两者同时冻结 (无 SNN 影响的对照基线)
         bool ablate_prompt = false;
         bool ablate_sampler = false;
+        // ---- 饱和情绪注入开关 (--emotion-force, 2026-08-07 判别实验) ----
+        // 无视 SNN 实际读出, 强制把 EmotionState 覆盖为饱和值, 用于构造
+        // "同一输入 + 同一文字通道冻结 + 仅数值通道极性不同" 的干净对照。
+        // 取值: sad | happy | neutral (空 = 不强制, 走 SNN 真实状态)
+        std::string emotion_force;
     };
 
     explicit EmotionEngine(Options opt);

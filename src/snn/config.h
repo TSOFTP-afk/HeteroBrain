@@ -529,12 +529,12 @@ enum class InhibitorySubtype : uint8_t {
 //   受体灵敏度 receptor_sensitivity[ch] *= (1 - rate * (mean - baseline))
 //   低于基线时缓慢回升 (upregulation, 速率减半避免震荡)
 // 作用: 让有效注入信号 = 原始信号 × receptor_sensitivity, 自然抑制持续超阈场景
-#define HOMEOSTATIC_RATE                0.002f  // 受体下调速率 (每 100 步, 缓慢)
+#define HOMEOSTATIC_RATE                0.01f   // 受体下调速率 (每 100 步, 2026-08-07 由 0.002 加强: 原太慢拉不回贴顶的 5HT/GABA/Oxy)
 #define HOMEOSTATIC_UPREG_RATE          0.001f  // 受体上调速率 (更慢, 避免震荡)
-#define RECEPTOR_SENSITIVITY_MIN        0.3f    // 灵敏度下限 (防完全失敏, 保底 30%)
+#define RECEPTOR_SENSITIVITY_MIN        0.10f   // 灵敏度下限 (2026-08-07 由 0.3 下调: 允许持续超阈通道真正脱敏, 不保底 30%)
 #define RECEPTOR_SENSITIVITY_MAX        1.0f    // 灵敏度上限 (不超过原始)
 // 各调质的稳态基线阈值 (超过此值触发下调, 与 BASE 对齐)
-#define HOMEOSTATIC_BASELINE_DA         0.15f   // DA 稳态阈值 (略高于 DA_BASE=0.1)
+#define HOMEOSTATIC_BASELINE_DA         0.30f   // DA 稳态阈值 (2026-08-07 同步 DA_BASE↑)
 #define HOMEOSTATIC_BASELINE_ACH        0.25f   // ACh 稳态阈值
 #define HOMEOSTATIC_BASELINE_NE         0.20f   // NE 稳态阈值
 #define HOMEOSTATIC_BASELINE_HT5        0.20f   // 5HT 稳态阈值
@@ -637,7 +637,7 @@ static_assert(N_MOTOR_GROUPS * MOTOR_GROUP_SIZE == N_MOTOR_NEURONS,
 #define PREDICTION_DELAY_STEPS        3
 
 // DA (多巴胺) 基础浓度与增益 (用于运动皮层奖励调制)
-#define DA_BASE                       0.1f
+#define DA_BASE                       0.3f     // 2026-08-07 0.1→0.3: 给奖赏基础, 正向事件能把 P 推高, 形成正负双向
 #define DA_GAIN                       0.5f
 
 // -----------------------------------------------------------------------------

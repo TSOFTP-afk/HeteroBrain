@@ -56,6 +56,9 @@ public:
     // ---- LLM→SNN 回流 (经已注入反馈端; 未注入时静默丢弃) ----
     void emit_empathy(float level);
     void emit_event(const float modulator_delta[6], int duration_steps);
+    // 他人情绪弱泄入 (2026-08-07): 转发到反馈端, 附带文本供工作台 OTHER 标签
+    void emit_other_emotion(const float weak_delta[6], int duration_steps,
+                            const char* text, int text_len);
     void emit_embodied_reward(float reward);
     // 世界事件 (事件类型, 强度) → 反馈端 emit_world_event (Phase 3a-G):
     //   事件类型直通 SNN (杏仁核 LA 注入 + 联合皮层子区域注入), 强度 [-50,50]

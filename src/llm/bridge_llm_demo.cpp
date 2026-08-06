@@ -48,6 +48,14 @@ public:
         state.dominance = state.dopamine - 0.5f * state.oxytocin;
     }
 
+    // 他人情绪弱泄入 (2026-08-07): 与自我事件同构, 仅打印弱增量
+    void emit_other_emotion(const float d[6], int duration,
+                            const char* text, int text_len) override {
+        std::printf("[sink] other_emotion=[DA %+.2f ACh %+.2f NE %+.2f 5HT %+.2f GABA %+.2f Oxy %+.2f] dur=%d text=%.*s\n",
+                    d[0], d[1], d[2], d[3], d[4], d[5], duration,
+                    text_len > 0 ? text_len : 0, text ? text : "");
+    }
+
     void emit_embodied_reward(float reward) override {
         std::printf("[sink] reward=%.2f\n", reward);
     }

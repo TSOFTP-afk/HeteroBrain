@@ -45,6 +45,17 @@ public:
     // (未来接事件抽取 → SnnFeedbackSink::emit_event, 实现情绪语义锚点)
     virtual void on_user_turn(const std::string& user_text) = 0;
     virtual void on_assistant_turn(const std::string& assistant_text) = 0;
+
+    // 语义情感抽取 (词典→LLM 串联流水线的 LLM 语义裁决, 2026-08-07):
+    //   对一段文本做一次短生成, 输出语义类别 (RawEmotion.emotion/attitude) + 强度。
+    //   dict_hint: 词典一遍产出的先验 (类别人话摘要), 供 LLM 参照做语义裁决, 弥补
+    //     关键词词典对否定句/改写/反讽的盲区; 为空则表示无词典先验。
+    //   数值映射由调用方 (EmotionBridge) 经 emotion_from_category/attitude_from_category 完成。
+    // 返回值: 0 成功且 out.ok=true; 负值 = 未支持/失败 (调用方降级为纯词典)。
+    virtual int extract_emotion(const std::string& /*text*/, const std::string& /*dict_hint*/,
+                                RawEmotion& /*out*/) {
+        return -1;
+    }
 };
 
 }  // namespace bridge
