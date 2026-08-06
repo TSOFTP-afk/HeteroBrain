@@ -1,5 +1,7 @@
 # VITA（维塔）— 人工情感核心 / VITA — Artificial Affective Core
 
+![VITA Logo](assets/vita_ui_pixel.jpg)
+
 > **SNN × LLM 异构认知架构**：SNN 作为**人工情感核心**（情感动力学 · 记忆检索 · 意图决策 · 调度器官），LLM 作为**语言皮层**（语言理解与表达）。
 > **Heterogeneous cognitive architecture**: the SNN acts as the **artificial affective core** (affective dynamics · memory retrieval · intent decision · scheduling), while the LLM acts as the **language cortex** (language understanding and expression).
 >
@@ -147,7 +149,28 @@ snn_train --resume checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e --ste
 # 上条命令加 --eval-emergent 即可
 ```
 
-### 4. 对话引擎 / Dialogue Engine
+### 4. 一键启动（推荐）/ One-Click Launcher
+
+直接双击或在 PowerShell/CMD 中运行：
+
+```batch
+start_vita.bat
+```
+
+脚本会检查引擎、checkpoint、模型和语料文件，然后启动引擎：播放 4 阶段 VITA 苏醒动画 → 选择运行模式（1=对话模式，2=HTTP 服务）→ 进入交互。
+
+`start_vita.bat` 顶部可配置：
+
+```batch
+set "ENGINE=build\root\bin\vita_engine.exe"
+set "CHECKPOINT=checkpoints\middle_1a_longarc_all\ckpt_step110000.snn2e"
+set "MODEL=F:\hb_models\Qwen3-4B-Q4_K_M.gguf"
+set "TEXT=data\scripts\story_text_all.txt"
+```
+
+> **为什么需要 `--text`？** checkpoint 保存了训练语料的指纹，resume 时必须加载同一语料，否则 SNN 内部状态与文本流位置不一致。该文本作为 SNN 持续运行的"燃料"，被编码为神经元群体输入。
+
+### 5. 对话引擎 / Dialogue Engine
 
 ```powershell
 vita_engine.exe --resume checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e `
@@ -155,7 +178,7 @@ vita_engine.exe --resume checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e
     --mod-interval 10 --steps-per-turn 10 --memory-budget-mb 4096
 ```
 
-### 5. OpenAI 兼容 serve / OpenAI-Compatible Serve
+### 6. OpenAI 兼容 serve / OpenAI-Compatible Serve
 
 ```powershell
 vita_engine.exe --serve --port 8899 --api-key <key> --model-name thetrueai `
