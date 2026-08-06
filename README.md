@@ -1,6 +1,6 @@
 # VITA（维塔）— 人工情感核心 / VITA — Artificial Affective Core
 
-![VITA Logo](assets/vita_ui_pixel.jpg)
+![VITA Logo](assets/vita_logo.png)
 
 > **SNN × LLM 异构认知架构**：SNN 作为**人工情感核心**（情感动力学 · 记忆检索 · 意图决策 · 调度器官），LLM 作为**语言皮层**（语言理解与表达）。
 > **Heterogeneous cognitive architecture**: the SNN acts as the **artificial affective core** (affective dynamics · memory retrieval · intent decision · scheduling), while the LLM acts as the **language cortex** (language understanding and expression).
