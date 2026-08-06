@@ -333,10 +333,38 @@ public:
     //   在 scheduler.step() 之前调用 (沙盒 feedback 后), 本次 STDP 立即生效 (无滞后)
     void n3f_embodied_step(float reward);
 
+    // ==================== Phase 3a-F (M1/M3): 杏仁核 + HPA 皮质醇 ====================
+    // 事件→杏仁核 LA 注入 + 负性事件累积 HPA 皮质醇应激
+    //   (main.cpp/engine 事件 dispatch 时调用, 与 set_event_signal 并列;
+    //    LA→BA 前向积分 + STDP 权重更新在 scheduler.step() 内每步推进;
+    //    BA 输出→调质调制 (正性→DA↑/负性→NE↑) 在每调制更新时应用, 评估冻结时跳过)
+    void amygdala_event_inject(int event_type, float intensity);
+    // 读取杏仁核 BA 输出 (负性/正性组发放率 [0,1]) (日志/桥接用)
+    void read_amygdala_output(float* out_neg, float* out_pos);
+    // 当前 HPA 皮质醇水平 [0,1] (日志/桥接用)
+    float cortisol_level() const;
+
     // 具身感知注入 (2026-08-01 修复):
     //   main.cpp 在 env 步计算 50 柱感知向量后调用; step() 内部在 delay_inject
     //   (清零 d_input_current) 之后、lif_adex 之前注入, 确保感知信号不被覆盖
     void set_embodied_sensory(const float sensory[50]);
+
+    // ==================== Phase 3a-G (A): 事件→联合皮层直通注入 ====================
+    // 根因修复: 事件调制对联合皮层传导 <2.3% (被文本流淹没), readout 只能学平均
+    // 状态 → 事件信息必须直接进入网络内部。事件类型 k → 联合皮层固定子区域
+    // 注入电流 (与文本流并行), rate 携带事件信息后 readout 才有可学信号。
+    //   main.cpp/engine 事件 dispatch 时与 set_event_signal/amygdala_event_inject
+    //   并列调用; step() 内 delay_inject 之后、lif_adex 之前注入, 持续
+    //   EVENT_CORTEX_HOLD_STEPS 步 (仿 set_embodied_sensory 时序)
+    void set_event_cortex_inject(int event_type, float intensity);
+
+    // ==================== Phase 3a-H (M4): 脑岛内感受 ====================
+    // 身体锚点: 内感受 (饥饿/温度/舒适/疲劳/疼痛) → 脑岛群体 → 调质调制
+    //   (不适→NE↑, 舒适→Oxy↑)。main.cpp 每环境步 (100 SNN 步) 调 set_insula_sensory
+    //   刷新 15 柱内感受 (embodied 模式); 非 embodied 模式无输入 → 脑岛静默。
+    void set_insula_sensory(const float intero15[15]);
+    // 读取脑岛 5 维输出 (日志/桥接用, [hunger, temp偏离, comfort, fatigue, pain])
+    void read_insula_output(float out[5]);
 
     // Task D3: 暴露 d_gate_states_ 供 main.cpp 在 BPE 注入时使用
     // (BPE 模式下 main.cpp 在 step() 之前调用 launch_bpe_inject, 需要传入门控状态)
@@ -415,6 +443,24 @@ private:
     // 具身感知注入 (2026-08-01 修复): 感知向量由 main.cpp 设置, step() 内注入
     float h_embodied_sensory_[50] = {};      // host 缓存 50 柱感知向量
     bool  embodied_sensory_active_ = false;  // 是否有待注入的感知向量
+
+    // ---- Phase 3a-G (A): 事件→联合皮层注入挂起状态 (2026-08-06) ----
+    int   h_event_cortex_pending_type_ = -1; // -1 = 无挂起事件
+    float h_event_cortex_pending_gain_ = 0.0f; // 当前注入电流增益 (强度已缩放)
+    int   h_event_cortex_hold_left_ = 0;      // 剩余注入步数
+
+    // ---- Phase 3a-H (M4): 脑岛内感受缓存 (2026-08-06) ----
+    // 15 柱内感受 → 5 维强度 (set_insula_sensory 内换算, 持续注入非脉冲):
+    //   [hunger不适, temp偏离, comfort高, fatigue, pain] ∈ [0,1]
+    float h_insula_dims_[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    bool  insula_active_ = false;   // 是否有内感受输入 (embodied 模式)
+
+    // ---- Phase 3a-I (M2): VTA-DA RPE 神经化缓存 (2026-08-06) ----
+    // RPE 信号为调制窗口级: launch_modulatory 内更新注入强度缓存 (用本窗口
+    // da_delta/prediction_error_norm), 下一窗口注入; 同时读 VTA 窗口累计发放率
+    // (上一窗口注入的响应) → h_vta_rpe_ → 下窗口 STDP 第三因子 DA 叠加项
+    float h_vta_rpe_inject_[2] = {0.0f, 0.0f};  // 注入强度缓存 [正RPE, 负RPE]
+    float h_vta_rpe_ = 0.0f;                    // VTA 发放差 pos-neg ∈ [-1,1]
 
     // ==================== Task 4-5: 在线解码状态 ====================
     float last_decode_loss_ = 0.0f;            // 最近一次解码 cross-entropy loss
@@ -501,6 +547,20 @@ private:
     bool  bptt_freeze_ = false;             // 冻结 BPTT 更新 (评估模式)
     bool  weights_freeze_ = false;          // 冻结突触权重写入 (评估模式, B3)
     std::string learning_rule_ = "bptt";    // 课程突触学习算法: bptt | n3f
+
+    // ---- Phase 3a-F (M3): HPA 皮质醇快照 (checkpoint 持久化用) ----
+    // 值来自 modulatory_kernels.cu 的 g_cortisol 全局; 存此处以便作为独立
+    // checkpoint section 持久化 (不塞进 SchedulerState, 避免破坏旧版加载)
+    float h_cortisol_snapshot_ = 0.0f;
+
+    // ---- Phase 3a-F (M1): 杏仁核 BA 窗口累计 (2026-08-06) ----
+    // 每步在 step() 内把当前 BA 正/负性组发放率累加进来; 调制更新时
+    // (launch_modulatory) 读出作为窗口内情感反应强度并清零。BA 发放窗口
+    // 仅持续注入期 ~10 步, 与 mod 读取点 (100/200/...) 错位, 必须跨步累计。
+    float h_amyg_ba_neg_accum_ = 0.0f;   // 窗口累计负性组发放率
+    float h_amyg_ba_pos_accum_ = 0.0f;   // 窗口累计正性组发放率
+    float h_amyg_ba_neg_last_ = 0.0f;    // 最近一窗口累计 (日志用)
+    float h_amyg_ba_pos_last_ = 0.0f;
 
     // ---- 阶段参数 (仅课程模式生效, 由 set_curriculum_stage 填充) ----
     CurriculumStage curriculum_stage_ = STAGE_ENLIGHTENMENT;  // 当前课程发育阶段

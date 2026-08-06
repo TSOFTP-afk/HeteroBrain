@@ -248,6 +248,10 @@ bool parse_run_config(int argc, char** argv, RunConfig* config, std::string* err
             //   前序窗口状态传导到后续窗口 (远程因果训练), 配套
             //   generate_serial_curriculum.py 连续叙事数据
             config->curriculum_continuous = true;
+        } else if (arg == "--eval-emergent") {
+            // 2026-08-06: 情绪涌现诊断 (仅 curriculum-eval 模式) —
+            //   L1 事件信息扩散 (非注入区响应) / L2 readout 权重依赖 / L3 皮层模式情绪区分度
+            config->eval_emergent = true;
         } else if (arg == "--learning-rule") {
             // Phase 3a-D3: 课程突触学习算法 (bptt=窗口反传 / n3f=三因子在线)
             value = require_value(&i, "--learning-rule");
@@ -318,6 +322,8 @@ const char* run_config_usage() {
         "  --curriculum-lr F         curriculum readout learning rate (default: 0.001)\n"
         "  --curriculum-eval         eval mode: freeze weights, report tool-accuracy & modulator MSE\n"
         "  --curriculum-eval-samples N  number of eval samples (default: 100)\n"
+        "  --eval-emergent         (with --curriculum-eval) emotion emergence diagnostics:\n"
+        "                            L1 event-info spread / L2 readout weight dependence / L3 pattern valence discriminability\n"
         "  --curriculum-readout-warmup N  N3F: freeze readout update for first N steps (spec 7.7)\n"
         "  --curriculum-continuous   continuous curriculum: no concentration-sim reset at\n"
         "                             window boundary (long-range causal training; pair with\n"

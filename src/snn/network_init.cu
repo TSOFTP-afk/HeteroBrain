@@ -20,6 +20,9 @@
 // =============================================================================
 
 #include "network_init.cuh"
+#include "amygdala_kernels.cuh"
+#include "insula_kernels.cuh"
+#include "vta_kernels.cuh"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -807,6 +810,24 @@ void init_network(MemoryAllocator* alloc, float psw_evidence_total, uint32_t see
            (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float) / (1024.0 * 1024.0));
     CUDA_CHECK_2E(cudaMemset(b.d_decode_weights, 0,
                               (size_t)N_TOTAL_NEURONS_2E * 256 * sizeof(float)));
+
+    // -----------------------------------------------------------------
+    // 杏仁核情感学习核心 (Phase 3a-F, M1): 状态清零 + 权重随机初始化
+    // -----------------------------------------------------------------
+    printf("[Stage2e P1] 初始化杏仁核 LA/BA (500×500 STDP 权重)...\n");
+    init_amygdala(alloc, seed);
+
+    // -----------------------------------------------------------------
+    // 脑岛内感受模块 (Phase 3a-H, M4): 状态清零 (无学习权重)
+    // -----------------------------------------------------------------
+    printf("[Stage2e P1] 初始化脑岛内感受 (5 维 × 200 LIF)...\n");
+    init_insula(alloc);
+
+    // -----------------------------------------------------------------
+    // VTA-DA 模块 (Phase 3a-I, M2): 状态清零 (无学习权重)
+    // -----------------------------------------------------------------
+    printf("[Stage2e P1] 初始化 VTA-DA RPE 群体 (正/负各 500 LIF)...\n");
+    init_vta(alloc);
 
     printf("[Stage2e P1] 网络初始化完成\n");
 }

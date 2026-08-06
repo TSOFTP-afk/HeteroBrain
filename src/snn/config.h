@@ -25,6 +25,7 @@
 // =============================================================================
 
 #include <cstdint>
+#include "event_types.h"   // EVT_COUNT (Phase 3a-G: 事件→联合皮层子区域映射用)
 
 // 当被纯 C++ 文件 (如 test_event_scheduler.cpp 等 host 单测) 包含时,
 // __host__/__device__ 关键字未定义, fallback 为空宏让 MSVC 也能编译 (与 types.h 一致)
@@ -400,6 +401,87 @@ enum class InhibitorySubtype : uint8_t {
 #define GABA_GAIN                       0.4f    // NE 反馈增益
 #define OXYTOCIN_BASE                   0.05f
 #define OXYTOCIN_GAIN                   0.3f    // 共情驱动增益
+
+// -----------------------------------------------------------------------------
+// Phase 3a-F: HPA 应激慢轴 (皮质醇, 2026-08-06 生物拟真 M3)
+// -----------------------------------------------------------------------------
+// 生物学: NE 快应激 (秒级) + HPA 轴 → 皮质醇慢应激 (分钟级持久, 事件后恢复惯性)
+// 慢性应激 → 5HT 基线下降 (抑郁模型) + GABA 基线上升 (代偿性抑制)
+// 实现: host 端皮质醇标量 (非 per-neuron, 零显存), 事件应激累积 + 慢衰减,
+//   在 launch_modulatory 中调制 5HT/GABA 基线 (补分钟级时间尺度层)
+#define CORTISOL_TAU            3000.0f   // 皮质醇衰减时间常数 (步, 慢通道)
+#define CORTISOL_HT5_MOD        0.30f     // 应激→5HT 基线调制系数 (慢性应激 5HT↓)
+#define CORTISOL_GABA_MOD       0.20f     // 应激→GABA 基线调制系数 (代偿性抑制↑)
+#define CORTISOL_STRESS_GAIN    0.08f     // 单事件应激量→皮质醇累积增益
+
+// -----------------------------------------------------------------------------
+// Phase 3a-F: 杏仁核情感学习核心 (2026-08-06 生物拟真 M1)
+// -----------------------------------------------------------------------------
+// 生物学: 杏仁核 LA→BA 回路 = 情感条件反射中枢 (CS-US 关联经 STDP 学习)
+// 实现: 独立小模块 (不并入 60K 主网络, 不破坏 N_TOTAL_NEURONS_2E 契约);
+//   LA 按事件类型分组接收事件输入, LA→BA 全连接权重 STDP 学习,
+//   BA 输出分正/负性组 → 调制调质 (负性→NE↑/DA↓, 正性→DA↑)
+#define N_AMYGDALA_LA           500       // LA 输入侧神经元数
+#define N_AMYGDALA_BA           500       // BA 输出侧神经元数 (前 250 负性 / 后 250 正性)
+#define AMYGDALA_BA_NEG_GROUP   250       // BA 负性组神经元数 (前段)
+#define AMYGDALA_LEAK           0.05f     // 膜电位泄漏
+#define AMYGDALA_THRESHOLD      0.5f      // 发放阈值
+#define AMYGDALA_RESET          0.0f      // 发放后重置
+#define AMYGDALA_INJECT_GAIN    0.35f     // 事件注入电流增益
+#define AMYGDALA_INJECT_DURATION 10       // 事件注入持续步数 (单事件不是单步脉冲, 生物上持续数百 ms; LA 累积积分后发放率编码强度)
+#define AMYGDALA_STDP_LR        0.01f     // STDP 学习率
+#define AMYGDALA_STDP_A_PLUS    0.04f     // LTP 增量
+#define AMYGDALA_STDP_A_MINUS   0.02f     // LTD 增量
+#define AMYGDALA_W_INIT         0.05f     // LA→BA 初始权重基准
+#define AMYGDALA_W_MAX          1.0f      // 权重上限
+#define AMYGDALA_NEG_BIAS       0.10f     // 初始偏置: 负性 LA 组 → 负性 BA 组
+#define AMYGDALA_POS_BIAS       0.10f     // 初始偏置: 正性 LA 组 → 正性 BA 组
+#define AMYGDALA_DA_MOD         0.08f     // 正性输出→DA 调制增益 (2026-08-06 调低: 0.25→0.08 防浓度饱和)
+#define AMYGDALA_NE_MOD         0.08f     // 负性输出→NE 调制增益 (同上)
+#define AMYGDALA_CORTISOL_GAIN  0.04f     // 负性输出→皮质醇增益 (0.10→0.04 防慢轴饱和)
+
+// -----------------------------------------------------------------------------
+// Phase 3a-G (A): 事件→联合皮层直通注入通道 (2026-08-06)
+// -----------------------------------------------------------------------------
+// 根因修复: 事件调制对联合皮层发放传导 <2.3% (被文本流淹没), readout 只能学
+// 平均状态 → 事件信息必须直接进入网络内部。事件类型 k → 联合皮层固定子区域
+// [k*REGION, (k+1)*REGION) 注入电流 (与文本流并行, 互不覆盖)。
+// 11 类事件 → 50K 联合皮层: REGION = 50000/11 = 4545 (余 5 神经元不用)
+#define EVENT_CORTEX_REGION_SIZE  (N_ASSOCIATION_NEURONS_2E / EVT_COUNT)
+#define EVENT_CORTEX_GAIN         6.0f    // 注入电流增益 (2026-08-06 调低: 12→6, 与 SENSORY 同量级, 防浓度饱和/网络过激活)
+#define EVENT_CORTEX_HOLD_STEPS   10      // 持续注入步数 (事件不是单步脉冲; LA/BA 同设计)
+
+// -----------------------------------------------------------------------------
+// Phase 3a-H (M4): 脑岛内感受模块 (2026-08-06)
+// -----------------------------------------------------------------------------
+// 生物学: 脑岛整合内感受 (饥饿/温度/舒适/疲劳/疼痛) → 主观情绪 ("先有身体反应,
+// 才有情绪")。独立小模块 (不并入 60K 主网络), 无学习权重 (简单 LIF 积分),
+// 输出调制调质: 身体不适→NE↑, 舒适→Oxy↑ — 情感获得身体锚点。
+#define N_INSULA_NEURONS         1000    // 5 维 × 200
+#define INSULA_GROUP_SIZE        (N_INSULA_NEURONS / 5)  // 200
+#define INSULA_LEAK              0.05f
+#define INSULA_THRESHOLD         0.5f
+#define INSULA_RESET             0.0f
+#define INSULA_INJECT_GAIN       0.40f   // 内感受注入电流增益
+#define INSULA_NE_MOD            0.08f   // 身体不适→NE 调制增益
+#define INSULA_OXY_MOD           0.10f   // 舒适→Oxy 调制增益
+
+// -----------------------------------------------------------------------------
+// Phase 3a-I (M2): VTA-DA 奖赏预测误差 (RPE) 神经化 (2026-08-06 bio-plausible spec)
+// -----------------------------------------------------------------------------
+// 生物学: VTA DA 神经元发放 = RPE — 奖赏 burst / 预期落空 dip。
+// 功能: 正/负 RPE 两组 LIF 群体发放率差 → STDP 第三因子 DA 项叠加
+//   (M_ij 内 + VTA_STDP_GAIN·r_vta·da_receptor), 奖赏学习神经动力学化。
+// 独立小模块 (不并入主网络, 无学习权重), 与 M1/M4 同风格。
+#define N_VTA_NEURONS            1000    // 正/负 RPE 各 500
+#define VTA_GROUP_SIZE           (N_VTA_NEURONS / 2)  // 500
+#define VTA_LEAK                 0.05f
+#define VTA_THRESHOLD            0.5f
+#define VTA_RESET                0.0f
+#define VTA_INJECT_GAIN          0.5f    // RPE 强度→电流增益 (单步注入即达阈值)
+#define VTA_STDP_GAIN            0.6f    // STDP 第三因子叠加项增益 (r_vta·da_receptor)
+#define VTA_POS_GAIN             0.5f    // da_delta>0→正组注入强度增益
+#define VTA_NEG_GAIN             0.5f    // prediction_error_norm→负组注入强度增益
 
 // -----------------------------------------------------------------------------
 // Phase 3a-B: 稳态补偿 (Homeostatic Compensation, 防止病理滑移)

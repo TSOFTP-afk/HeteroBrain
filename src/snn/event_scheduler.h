@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cstddef>
+#include <functional>
 #include "event_types.h"
 #include "gene_event_map.h"
 
@@ -36,6 +37,12 @@ public:
 
     // 测试用: 直接访问事件列表 (用于单元测试)
     const std::vector<ScheduledEvent>& events() const { return events_; }
+
+    // Phase 3a-F (M1): 事件→杏仁核注入回调 (main.cpp 设置; 空时跳过)
+    //   由 dispatch_pending 在每次事件派发后调用 (事件类型 + 强度),
+    //   与 set_event_signal 并列 — 让事件流模式也能驱动杏仁核 LA 注入
+    //   用 std::function 而非裸函数指针 (main.cpp 需捕获 scheduler 引用)
+    std::function<void(int, float)> on_event_inject;
 
 private:
     std::vector<ScheduledEvent> events_;

@@ -145,6 +145,15 @@ void set_empathy_signal(float empathy_signal);
 //   优先级: h_event_signal > h_empathy_signal (empathy 作为 Oxy 通道 fallback)
 void set_event_signal(const float modulator_delta[6], int duration_steps);
 
+// Phase 3a-F (M3): HPA 应激慢轴 (皮质醇) host 接口
+//   set_cortisol_stress: 累积事件应激量 (0~1), 由事件注入方按事件类型调用
+//   get_cortisol_level:  当前皮质醇水平 (日志/桥接用)
+//   皮质醇在 launch_modulatory 内慢衰减 (CORTISOL_TAU), 调制 5HT/GABA 基线
+void set_cortisol_stress(float stress);
+float get_cortisol_level();
+// 设置皮质醇水平 (checkpoint 恢复用, 0~1 clamp)
+void set_cortisol_level(float v);
+
 // 清零事件信号缓存 (每步开始前调用, 配合 set_event_signal 累加注入) [Phase 3a-C2]
 void reset_event_signal();
 

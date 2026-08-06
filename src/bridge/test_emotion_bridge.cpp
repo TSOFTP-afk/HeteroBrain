@@ -83,6 +83,12 @@ public:
         last_reward = reward;
         ++reward_calls;
     }
+    // Phase 3a-G (C): 世界事件通道 (测试桥接层转发)
+    void emit_world_event(int event_type, float intensity) override {
+        last_world_type = event_type;
+        last_world_intensity = intensity;
+        ++world_calls;
+    }
 
     std::vector<float> empathy_levels;
     float last_event_delta[6] = {0, 0, 0, 0, 0, 0};
@@ -90,6 +96,9 @@ public:
     int   event_calls = 0;
     float last_reward = 0.0f;
     int   reward_calls = 0;
+    int   last_world_type = -1;
+    float last_world_intensity = 0.0f;
+    int   world_calls = 0;
 };
 
 void test_neutral_state() {
@@ -191,6 +200,11 @@ void test_bridge_orchestration() {
 
     bridge.emit_embodied_reward(0.3f);
     CHECK(sink.reward_calls == 1 && feq(sink.last_reward, 0.3f), "bridge: 奖励回流");
+
+    // Phase 3a-G (C): 世界事件回流
+    bridge.emit_world_event(5, 30.0f);   // 5 = EVT_CRITICISM
+    CHECK(sink.world_calls == 1 && sink.last_world_type == 5 &&
+          feq(sink.last_world_intensity, 30.0f), "bridge: 世界事件回流");
 
     // LLM→SNN 语义锚点 (后端回调透传)
     backend.on_user_turn("我很难过");

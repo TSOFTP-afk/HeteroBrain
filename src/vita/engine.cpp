@@ -44,15 +44,27 @@ namespace {
 
 class SnnSink final : public bridge::SnnFeedbackSink {
 public:
+    // Phase 3a-G (C): 世界事件注入需要 scheduler (杏仁核 LA 注入 + 联合皮层子区域注入)
+    void set_scheduler(stage2e::BioMechanismScheduler* s) { scheduler_ = s; }
     void emit_empathy(float level) override {
         stage2e::set_empathy_signal(level);
     }
     void emit_event(const float modulator_delta[6], int duration_steps) override {
         stage2e::set_event_signal(modulator_delta, duration_steps);
     }
+    // Phase 3a-G: 世界事件直通 SNN — 杏仁核 LA 注入 (M1) + 事件→联合皮层注入 (A),
+    //   与浓度通道 (emit_event) 并列; 事件类型语义见 src/snn/event_types.h
+    void emit_world_event(int event_type, float intensity) override {
+        if (scheduler_) {
+            scheduler_->amygdala_event_inject(event_type, intensity);
+            scheduler_->set_event_cortex_inject(event_type, intensity);
+        }
+    }
     void emit_embodied_reward(float reward) override {
         stage2e::set_embodied_reward(reward);
     }
+private:
+    stage2e::BioMechanismScheduler* scheduler_ = nullptr;
 };
 
 // AffectiveState (SNN 读出) → EmotionState (桥接层契约), 字段一一对应
@@ -175,6 +187,7 @@ EmotionEngine::EmotionEngine(Options opt) : opt_(std::move(opt)) {
     // ---- 4. 桥接层接线 ----
     bridge_.attach_backend(llm_.get());
     static SnnSink snn_sink;   // SNN 侧无生命周期问题 (仅转发到全局 setter)
+    snn_sink.set_scheduler(snn_->scheduler);   // Phase 3a-G (C): 世界事件注入
     bridge_.attach_snn_feedback(&snn_sink);
     bridge_.attach_emotion_extractor(&extractor_);
 
@@ -578,6 +591,59 @@ int EmotionEngine::run_serve() {
             }
             if (req.method == "POST" && req.path == "/v1/chat/completions") {
                 handle_chat(req, resp);
+                return true;
+            }
+            // Phase 3a-G (C): POST /v1/world — 世界事件直通 SNN
+            //   请求体: {"type": "criticism"|"achievement"|... | "event_type": <int>,
+            //            "intensity": -50..50 (默认 30)}
+            //   事件类型经 stage2e 枚举语义直通杏仁核 (M1) + 联合皮层子区域注入 (A),
+            //   不做 LLM 语义转换 (LLM 理解转化器属后续 spec)。注入后推进
+            //   mod_update_interval 步, 事件情感动力学立即演化 (下轮对话读出可见)。
+            if (req.method == "POST" && req.path == "/v1/world") {
+                json::Value body;
+                std::string jerr;
+                if (!json::parse(req.body, body, &jerr)) {
+                    resp.status = 400;
+                    resp.body = error_json("invalid_request", "bad JSON: " + jerr);
+                    return true;
+                }
+                int evt_type = -1;
+                const json::Value* t = body.find("type");
+                if (t && t->type == json::Value::kStr) {
+                    evt_type = stage2e::event_type_from_string(t->as_str().c_str());
+                } else {
+                    const json::Value* e = body.find("event_type");
+                    if (e && e->type == json::Value::kNum) {
+                        evt_type = static_cast<int>(e->as_num());
+                    }
+                }
+                if (evt_type < 0 || evt_type >= stage2e::EVT_COUNT) {
+                    resp.status = 400;
+                    resp.body = error_json("invalid_request", "unknown event type");
+                    return true;
+                }
+                int intensity = 30;
+                const json::Value* iv = body.find("intensity");
+                if (iv && iv->type == json::Value::kNum) {
+                    intensity = static_cast<int>(iv->as_num());
+                }
+                if (intensity < -50) intensity = -50;
+                if (intensity > 50) intensity = 50;
+
+                bridge_.emit_world_event(evt_type, static_cast<float>(intensity));
+                std::printf("[world] event_type=%d intensity=%d\n", evt_type, intensity);
+                std::fflush(stdout);
+                // 事件注入后推进一轮, 事件情感动力学立即演化
+                for (int i = 0; i < opt_.mod_update_interval; ++i) {
+                    snn_->scheduler->step(step_++);
+                }
+                json::Value root = json::Value::make_obj();
+                root.obj.emplace_back("ok", json::Value(1.0));
+                root.obj.emplace_back("event_type", json::Value((double)evt_type));
+                root.obj.emplace_back("intensity", json::Value((double)intensity));
+                root.obj.emplace_back("cortisol",
+                    json::Value((double)stage2e::get_cortisol_level()));
+                resp.body = json::dump(root);
                 return true;
             }
             resp.status = 404;

@@ -19,9 +19,9 @@ VITA is not just another Transformer LLM, nor a pure SNN research project. It is
 | **LLM 语言皮层** / Language cortex | 语言理解与生成、世界知识 / Language understanding, generation, world knowledge | llama.cpp + Qwen3-4B（INT4 GGUF，2.5GB）；MiniCPM5-1B 已弃用 |
 | **Bridge 桥接层** / Bridge | 情感→调制信号（文字通道 + logit_bias + 采样参数）、对话→SNN 输入 / Affect → modulation signals; dialogue → SNN input | affective_mapping / emotion_bridge / snn_feedback |
 
-**当前核心工程事实**（2026-08-06）：readout 根因已实锤——事件调制对联合皮层发放传导 <2.3%，情感目前只存在于外部浓度模拟器、尚未进入网络内部。修复方向是**事件直通联合皮层注入通道**（事件→固定子区域激活，与文本流并行），详见 [docs/bug-inventory-2026-08-04.md](file:///f:/thetrueai/docs/bug-inventory-2026-08-04.md)。
+**当前核心工程事实**（2026-08-06 深夜）：readout 根因已修复——事件直通联合皮层注入通道（事件→固定子区域，与文本流并行）已交付，事件信号进入网络内部（事件子区域 ratio>2，nz 全激活）。110K 训练 + 120 样本 eval 判据达标：mod MSE 0.0383（历史最优，90K 0.184 ↓79%）。生物拟真模块 M1-M4（杏仁核/HPA 皮质醇/脑岛/VTA-DA）已交付，详见 [docs/bio-plausible-modules-spec.md](docs/bio-plausible-modules-spec.md)。
 
-**Current engineering fact** (2026-08-06): the readout root cause is confirmed — event modulation propagates <2.3% into association-cortex firing; affect currently lives only in the external concentration simulator and never enters the network. The fix is a **direct event→association-cortex injection channel** (events activate fixed sub-regions, parallel to the text stream).
+**Current engineering fact** (2026-08-06 late): the readout root cause is fixed — the direct event→association-cortex injection channel (events activate fixed sub-regions, parallel to the text stream) is delivered; event signals now enter the network (event sub-region ratio>2, fully activated). 110K training + 120-sample eval pass both criteria: mod MSE 0.0383 (best ever; −79% vs the 0.184 at 90K). Bio-plausible modules M1–M4 (amygdala / HPA cortisol / insula / VTA-DA) are delivered — see [docs/bio-plausible-modules-spec.md](docs/bio-plausible-modules-spec.md).
 
 ---
 
@@ -82,21 +82,22 @@ flowchart TB
 
 ---
 
-## 当前状态 / Current Status（2026-08-06）
+## 当前状态 / Current Status（2026-08-06 深夜）
 
 | 项 / Item | 状态 / Status | 说明 / Notes |
 |---|---|---|
 | 异构引擎闭环 / Engine loop | ✅ | resume → SNN 推进 → Affective 读出 → 情感调制 → llama.cpp 生成（Qwen3-4B，思考模式保留） |
-| OpenAI 兼容 serve / Serve mode | ✅ | `GET /v1/models` + `POST /v1/chat/completions`，Bearer 鉴权，SNN 每请求推进，情感跨请求演化 |
+| OpenAI 兼容 serve / Serve mode | ✅ | `GET /v1/models` + `POST /v1/chat/completions`，Bearer 鉴权，SNN 每请求推进，情感跨请求演化；`POST /v1/world` 世界事件注入 |
 | SNN 记忆接入 / SNN memory | ✅ 一期 | WM/海马 PCA 签名 + host 解码字节指纹注入 system |
 | logit_bias 通道 / Logit-bias channel | ✅ | SNN 逐 token 干预 LLM 采样分布 |
-| 80K 重训 / 80K retrain | ✅ | N3F + `--curriculum-continuous`，decode PPL 137→19.8 |
-| **readout 根因实锤** / Root cause confirmed | ⚠️ | 事件→皮层传导 <2.3%，情感未进网络内部，mod MSE 0.3519（判据 0.0339） |
-| 事件→皮层注入通道 / Event→cortex channel | 📋 计划 | 事件直通联合皮层固定子区域，rate 携带事件信息（下一步） |
+| 事件→皮层注入 / Event→cortex channel | ✅ | 事件直通联合皮层固定子区域（11×4545），ratio>2，事件信号进入网络内部 |
+| 生物拟真模块 / Bio modules M1-M4 | ✅ | 杏仁核情感学习 / HPA 皮质醇慢轴 / 脑岛内感受 / VTA-DA 奖赏环路（见 spec 文档） |
+| **110K 训练 + eval 判据** / 110K training & eval | ✅ | mod MSE 0.0383（历史最优）；事件可辨性多数类型 ratio>2；decode acc 38.8% |
+| 情绪涌现诊断 / Emergence diagnostics | 🔬 进行中 | `--eval-emergent`：L1 事件扩散 / L2 readout 权重分布 / L3 模式效价区分度 |
 
-**当前训练配置**：N3F 在线学习 + `--curriculum-continuous` + `--bptt-window-size 400` + `--input-inject-interval 1`，checkpoint：`checkpoints/middle_1a_longarc_all/ckpt_step80000.snn2e`。
+**当前训练配置**：N3F 在线学习 + `--curriculum-continuous` + `--bptt-window-size 400` + `--embodied hunger_feeding`，checkpoint：`checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e`。浓度饱和已修复（AMYGDALA_DA/NE_MOD 0.25→0.08、EVENT_CORTEX_GAIN 12→6）。
 
-**Current training config**: N3F online learning + `--curriculum-continuous` + `--bptt-window-size 400` + `--input-inject-interval 1`; checkpoint: `checkpoints/middle_1a_longarc_all/ckpt_step80000.snn2e`.
+**Current training config**: N3F online learning + `--curriculum-continuous` + `--bptt-window-size 400` + `--embodied hunger_feeding`; checkpoint: `checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e`. Concentration saturation fixed (AMYGDALA_DA/NE_MOD 0.25→0.08, EVENT_CORTEX_GAIN 12→6).
 
 ---
 
@@ -129,18 +130,27 @@ cmake --build build/snn --target snn_train
 ### 3. 训练 / Training
 
 ```powershell
-# 80K 重训同款配置（长线课程数据）
-snn_train --curriculum-stage 1 --curriculum-continuous `
-    --bptt-window-size 400 --input-inject-interval 1 --learning-rule n3f --steps 80000
+# 续跑训练（90K→110K 同款，含事件注入 + 具身脑岛）
+snn_train --resume checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e --steps 120000 `
+    --curriculum data/events/curriculum_all.jsonl --curriculum-stage 1 --curriculum-continuous `
+    --bptt-window-size 400 --learning-rule n3f --curriculum-lr 0.0100 `
+    --embodied --embodied-scene hunger_feeding --input-mode byte `
+    --text data/scripts/story_text_all.txt --seed 42
 
-# 评估（120 样本，窗口必须 400）
-snn_train --eval --curriculum-stage 1 --bptt-window-size 400
+# 评估（120 样本，窗口必须 400，训练用 continuous 则 eval 必须同带）
+snn_train --resume checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e --steps 111200 `
+    --curriculum-eval --curriculum-eval-samples 120 --curriculum data/events/curriculum_all.jsonl `
+    --curriculum-stage 1 --curriculum-continuous --bptt-window-size 400 --input-mode byte `
+    --text data/scripts/story_text_all.txt --seed 42
+
+# 情绪涌现诊断（--eval-emergent: L1 事件扩散 / L2 readout 权重 / L3 模式效价区分度）
+# 上条命令加 --eval-emergent 即可
 ```
 
 ### 4. 对话引擎 / Dialogue Engine
 
 ```powershell
-vita_engine.exe --resume checkpoints/middle_1a_longarc_all/ckpt_step80000.snn2e `
+vita_engine.exe --resume checkpoints/middle_1a_longarc_all/ckpt_step110000.snn2e `
     --llm F:\hb_models\Qwen3-4B-Q4_K_M.gguf `
     --mod-interval 10 --steps-per-turn 10 --memory-budget-mb 4096
 ```
@@ -187,8 +197,10 @@ vita/
 
 ## 路线图 / Roadmap
 
-- [ ] **事件→联合皮层注入通道**（当前计划）：事件直通联合皮层固定子区域，readout 有可学信号，SNN 内部涌现情感编码
-  **Event→association-cortex injection channel** (current plan): direct event input to fixed cortical sub-regions so the readout has learnable signal and affect emerges inside the network.
+- [x] **事件→联合皮层注入通道**（✅ 已交付）：事件直通联合皮层固定子区域，readout 有可学信号，SNN 内部涌现情感编码
+  **Event→association-cortex injection channel** (✅ delivered): direct event input to fixed cortical sub-regions so the readout has learnable signal and affect emerges inside the network.
+- [ ] **情绪涌现诊断与验证**（进行中）：`--eval-emergent` 三级证据——事件信息扩散 / readout 权重分布 / 皮层模式效价区分度
+  **Emotion-emergence diagnostics** (in progress): three-level evidence — event-info spread / readout weight distribution / cortical pattern valence discriminability.
 - [ ] **浓度→发放即时调制**：调质浓度直接改变神经元兴奋性（神经调质生理角色），情感存在于网络内部
   **Concentration→firing modulation**: neuromodulators directly alter neuron excitability — affect lives inside the network.
 - [ ] **双输入接口**：`inject_world`（LLM 理解转化器→事件→皮层）+ `inject_dialogue`（对话→神经签名）

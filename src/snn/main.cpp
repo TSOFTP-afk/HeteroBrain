@@ -939,6 +939,19 @@ int main(int argc, char** argv) {
         scheduler.decode_update_weights = false;
         printf("[CurriculumEval] 评估 %d 个样本 (权重冻结, readout 不被更新)...\n", n_eval);
 
+        // Phase 3a-J (2026-08-06): 情绪涌现诊断 (--eval-emergent) 统计状态
+        //   L1 事件信息扩散: 注入子区域 vs 非注入区平均发放率 (按事件类型)
+        //   L2 readout 权重依赖: 注入区 readout 权重占比 vs 神经元占比
+        //   L3 皮层模式情绪区分度: 50 柱活动向量按事件类型/效价分组 → Fisher 比
+        const int EMG_N_COL = 50;   // 联合皮层柱数 (诊断近似, 50 段 × 1000)
+        int    emg_evt_count[stage2e::EVT_COUNT] = {0};
+        double emg_sub_sum[stage2e::EVT_COUNT] = {0};   // 注入子区域平均率累计
+        double emg_rest_sum[stage2e::EVT_COUNT] = {0};  // 非注入区平均率累计
+        double emg_full_sum[stage2e::EVT_COUNT] = {0};  // 全联合皮层平均率累计
+        struct EmgColSample { int evt_type; float vec[EMG_N_COL]; };
+        std::vector<EmgColSample> emg_col_samples;      // 每样本 50 柱模式向量
+        bool emg_l2_done = false;
+
         const stage2e::PersonalityProfile& prof =
             stage2e::personality_profile(static_cast<stage2e::CurriculumStage>(config.curriculum_stage));
         const int win = config.bptt_window_size;
@@ -1004,6 +1017,12 @@ int main(int argc, char** argv) {
                                           entry.ne_delta, entry.ht5_delta,
                                           entry.gaba_delta, entry.oxy_delta};
                         stage2e::set_event_signal(delta, 0);
+                        // Phase 3a-F (M1/M3): 事件→杏仁核 LA 注入 + 皮质醇应激累积
+                        scheduler.amygdala_event_inject(evt.event_type,
+                                                        static_cast<float>(evt.intensity));
+                        // Phase 3a-G (A): 事件→联合皮层直通注入 (rate 携带事件信息)
+                        scheduler.set_event_cortex_inject(evt.event_type,
+                                                          static_cast<float>(evt.intensity));
                     }
                 }
                 // 2026-08-02 Task 8: 每 100 步推进浓度模拟器 (连续浓度 ground truth,
@@ -1044,6 +1063,116 @@ int main(int argc, char** argv) {
                 for (int k = 0; k < 10; ++k)
                     printf("%d:%.3f%s", top[k], h_rate[top[k]], k < 9 ? " " : "");
                 printf("]\n");
+                // Phase 3a-G (A): 事件子区域可辨性 — 事件对应联合皮层子区域平均发放率
+                //   vs 全联合皮层均值。目标: ratio 显著高于均匀基线 (11 类事件均匀划分,
+                //   均匀期望 ratio ≈ 1.0; 事件子区域被注入电流激活 → ratio > 1 即有事件信号
+                //   进入网络, readout 才有可学特征)
+                if (!smp->events.empty()) {
+                    const int evt_type = smp->events[0].event_type;
+                    // main.cpp 不在 stage2e 命名空间, 宏 EVENT_CORTEX_REGION_SIZE 内的
+                    // 未限定 EVT_COUNT 不可见 → 手动计算 (EVT_COUNT 是限定枚举常量)
+                    const int region = N_ASSOCIATION_NEURONS_2E / stage2e::EVT_COUNT;
+                    const int start = evt_type * region;
+                    if (evt_type >= 0 && evt_type < stage2e::EVT_COUNT &&
+                        start + region <= N_ASSOCIATION_NEURONS_2E) {
+                        double sum_evt = 0.0, sum_all = 0.0;
+                        int nz_evt = 0, nz_all = 0;
+                        for (int i = 0; i < N_ASSOCIATION_NEURONS_2E; ++i) {
+                            if (h_rate[i] > 0.0f) { ++nz_all; sum_all += h_rate[i]; }
+                        }
+                        for (int i = start; i < start + region; ++i) {
+                            if (h_rate[i] > 0.0f) { ++nz_evt; sum_evt += h_rate[i]; }
+                        }
+                        const double rate_all = sum_all / N_ASSOCIATION_NEURONS_2E;
+                        const double rate_evt = sum_evt / region;
+                        printf("[RateStat] event_subregion type=%d evt_avg=%.4f all_avg=%.4f ratio=%.3f nz_evt=%d/%d\n",
+                               evt_type, rate_evt, rate_all,
+                               rate_all > 1e-9 ? rate_evt / rate_all : 0.0,
+                               nz_evt, region);
+                    }
+                }
+                // Phase 3a-J (2026-08-06): 情绪涌现诊断采集 (--eval-emergent)
+                //   复用本块 h_rate (全网络窗口累计发放率), 需在 h_rate 作用域内
+                if (config.eval_emergent) {
+                    const int region = N_ASSOCIATION_NEURONS_2E / stage2e::EVT_COUNT;
+                    if (!smp->events.empty()) {
+                        const int evt_type = smp->events[0].event_type;
+                        if (evt_type >= 0 && evt_type < stage2e::EVT_COUNT) {
+                            const int start = evt_type * region;
+                            double sum_evt = 0.0, sum_rest = 0.0, sum_full = 0.0;
+                            int n_rest = N_ASSOCIATION_NEURONS_2E - region;
+                            for (int i = 0; i < N_ASSOCIATION_NEURONS_2E; ++i) {
+                                sum_full += h_rate[i];
+                                if (i >= start && i < start + region) sum_evt += h_rate[i];
+                                else sum_rest += h_rate[i];
+                            }
+                            emg_evt_count[evt_type]++;
+                            emg_sub_sum[evt_type] += sum_evt / region;
+                            emg_rest_sum[evt_type] += (n_rest > 0) ? sum_rest / n_rest : 0.0;
+                            emg_full_sum[evt_type] += sum_full / N_ASSOCIATION_NEURONS_2E;
+                            // L3: 50 柱模式向量 (连续切片近似, 每柱 region*EVT/50 神经元)
+                            EmgColSample cs;
+                            cs.evt_type = evt_type;
+                            const int col_sz = N_ASSOCIATION_NEURONS_2E / EMG_N_COL;
+                            for (int c = 0; c < EMG_N_COL; ++c) {
+                                double s = 0.0;
+                                const int cs0 = c * col_sz;
+                                for (int i = cs0; i < cs0 + col_sz && i < N_ASSOCIATION_NEURONS_2E; ++i)
+                                    s += h_rate[i];
+                                cs.vec[c] = static_cast<float>(s / col_sz);
+                            }
+                            emg_col_samples.push_back(cs);
+                        }
+                    }
+                    // L2: readout 权重依赖 (首次样本一次性分析)
+                    //   事件子区域 = 11 类 × 4545 块并集 = 整个联合皮层, 故单块占比
+                    //   无信息; 改为统计各事件块的权重分布 — 若 readout 权重集中在
+                    //   少数事件块 (变异系数大) → 探测器模式; 均匀 → 分布式事件表征
+                    if (!emg_l2_done) {
+                        emg_l2_done = true;
+                        std::vector<float> h_ro(N_TOTAL_NEURONS_2E * 6, 0.0f);
+                        cudaMemcpy(h_ro.data(), b.d_curriculum_readout_weights,
+                                   N_TOTAL_NEURONS_2E * 6 * sizeof(float),
+                                   cudaMemcpyDeviceToHost);
+                        double w_block[stage2e::EVT_COUNT] = {0};
+                        double w_outside = 0.0;   // 联合皮层外 (前额叶+运动)
+                        for (int i = 0; i < N_TOTAL_NEURONS_2E; ++i) {
+                            double wl1 = 0.0;
+                            for (int m = 0; m < 6; ++m) wl1 += std::fabs(h_ro[(size_t)i * 6 + m]);
+                            if (i < N_ASSOCIATION_NEURONS_2E) {
+                                const int g = i / region;
+                                if (g >= 0 && g < stage2e::EVT_COUNT) w_block[g] += wl1;
+                            } else {
+                                w_outside += wl1;
+                            }
+                        }
+                        printf("[Emergent-L2] readout 权重分布 (11 事件块 × %d 神经元均值 |W|):\n",
+                               region);
+                        double w_mean_all = 0.0, w_var = 0.0;
+                        double w_block_mean[stage2e::EVT_COUNT];
+                        for (int t = 0; t < stage2e::EVT_COUNT; ++t) {
+                            w_block_mean[t] = w_block[t] / region;
+                            w_mean_all += w_block_mean[t];
+                        }
+                        w_mean_all /= stage2e::EVT_COUNT;
+                        for (int t = 0; t < stage2e::EVT_COUNT; ++t) {
+                            const double d = w_block_mean[t] - w_mean_all;
+                            w_var += d * d;
+                        }
+                        w_var = std::sqrt(w_var / stage2e::EVT_COUNT);
+                        printf("  %-6s", "type");
+                        for (int t = 0; t < stage2e::EVT_COUNT; ++t) printf(" %7d", t);
+                        printf("\n  %-6s", "|W|");
+                        for (int t = 0; t < stage2e::EVT_COUNT; ++t) printf(" %7.4f", w_block_mean[t]);
+                        printf("\n  均值为 %.4f, 变异系数 CV=%.3f "
+                               "(>0.5 权重集中于部分事件块→探测器模式; <0.3 均匀→分布式事件表征), "
+                               "联合皮层外占比=%.2f%%\n",
+                               w_mean_all,
+                               w_mean_all > 1e-12 ? w_var / w_mean_all : 0.0,
+                               w_outside > 1e-12 ? 100.0 * w_outside /
+                                                       (w_outside + w_mean_all * N_ASSOCIATION_NEURONS_2E) : 0.0);
+                    }
+                }
             }
             stage2e::launch_curriculum_readout_forward(b);
             stage2e::launch_curriculum_pad_forward(b);  // 2026-08-02 Task 5: PAD 头 (累计帧)
@@ -1109,6 +1238,84 @@ int main(int argc, char** argv) {
         for (int t = 0; t < 7; ++t) printf(" %.3f", last_h_tool[t]);
         printf(" ]\n");
 
+        // Phase 3a-J (2026-08-06): 情绪涌现诊断汇总
+        if (config.eval_emergent) {
+            // L1: 事件信息扩散 (按事件类型: 注入子区域 vs 非注入区)
+            printf("\n[Emergent-L1] 事件信息扩散 (窗口平均发放率, 注入子区域=11×%d 神经元):\n",
+                   N_ASSOCIATION_NEURONS_2E / stage2e::EVT_COUNT);
+            printf("  %-6s %-6s %-10s %-10s %-10s %-10s\n",
+                   "type", "n", "sub_avg", "rest_avg", "full_avg", "sub/rest");
+            for (int t = 0; t < stage2e::EVT_COUNT; ++t) {
+                if (emg_evt_count[t] <= 0) continue;
+                const double sub = emg_sub_sum[t] / emg_evt_count[t];
+                const double rest = emg_rest_sum[t] / emg_evt_count[t];
+                const double full = emg_full_sum[t] / emg_evt_count[t];
+                printf("  %-6d %-6d %-10.5f %-10.5f %-10.5f %-10.3f\n",
+                       t, emg_evt_count[t], sub, rest, full,
+                       rest > 1e-9 ? sub / rest : 0.0);
+            }
+            // L3: 皮层模式情绪区分度 (正/负效价二分类 Fisher 比)
+            //   效价判定: GENE_MAP_BASE[type].da_delta >= 0 → 正性
+            if (!emg_col_samples.empty()) {
+                double pos_centroid[EMG_N_COL] = {0};
+                double neg_centroid[EMG_N_COL] = {0};
+                int n_pos = 0, n_neg = 0;
+                for (const auto& cs : emg_col_samples) {
+                    const double v = stage2e::GENE_MAP_BASE[cs.evt_type].da_delta >= 0.0 ? 1.0 : 0.0;
+                    double* c = (v > 0.0) ? pos_centroid : neg_centroid;
+                    int& n = (v > 0.0) ? n_pos : n_neg;
+                    for (int k = 0; k < EMG_N_COL; ++k) c[k] += cs.vec[k];
+                    ++n;
+                }
+                if (n_pos > 0 && n_neg > 0) {
+                    for (int k = 0; k < EMG_N_COL; ++k) {
+                        pos_centroid[k] /= n_pos;
+                        neg_centroid[k] /= n_neg;
+                    }
+                    double dist_between = 0.0;
+                    for (int k = 0; k < EMG_N_COL; ++k) {
+                        const double d = pos_centroid[k] - neg_centroid[k];
+                        dist_between += d * d;
+                    }
+                    dist_between = std::sqrt(dist_between);
+                    // 类内平均距离 (样本到各自质心)
+                    double intra_sum = 0.0;
+                    int intra_cnt = 0;
+                    for (const auto& cs : emg_col_samples) {
+                        const double* c = (stage2e::GENE_MAP_BASE[cs.evt_type].da_delta >= 0.0)
+                                              ? pos_centroid : neg_centroid;
+                        double d2 = 0.0;
+                        for (int k = 0; k < EMG_N_COL; ++k) {
+                            const double d = cs.vec[k] - c[k];
+                            d2 += d * d;
+                        }
+                        intra_sum += std::sqrt(d2);
+                        ++intra_cnt;
+                    }
+                    const double intra = intra_cnt ? intra_sum / intra_cnt : 1.0;
+                    printf("[Emergent-L3] 皮层模式情绪区分度: 正性 n=%d 负性 n=%d | "
+                           "质心距离=%.4f 平均类内距离=%.4f Fisher比=%.3f "
+                           "(>2 模式明显可分 → 情绪编码涌现; <1 模式不可分 → 无自发编码)\n",
+                           n_pos, n_neg, dist_between, intra,
+                           intra > 1e-9 ? dist_between / intra : 0.0);
+                    // 逐类型均值模式 (诊断: 事件类型是否各具模式)
+                    printf("[Emergent-L3] 事件类型均值模式 (50 柱, 每类型一行, 正性+):\n");
+                    for (int t = 0; t < stage2e::EVT_COUNT; ++t) {
+                        if (emg_evt_count[t] <= 0) continue;
+                        double mean[EMG_N_COL] = {0};
+                        for (const auto& cs : emg_col_samples)
+                            if (cs.evt_type == t)
+                                for (int k = 0; k < EMG_N_COL; ++k) mean[k] += cs.vec[k];
+                        const char* sign = (stage2e::GENE_MAP_BASE[t].da_delta >= 0.0) ? "+" : "-";
+                        printf("  [type=%2d%s] ", t, sign);
+                        for (int k = 0; k < EMG_N_COL; ++k)
+                            printf("%.3f ", mean[k] / emg_evt_count[t]);
+                        printf("\n");
+                    }
+                }
+            }
+        }
+
         allocator.free_all();
         return 0;
     }
@@ -1119,6 +1326,11 @@ int main(int argc, char** argv) {
     stage2e::EventScheduler event_scheduler;
     bool event_stream_active = false;
     if (config.event_stream_enabled && !curriculum_active) {
+        // Phase 3a-F (M1): 事件流模式 → 杏仁核 LA 注入回调 (与课程循环同语义)
+        event_scheduler.on_event_inject = [&scheduler](int evt_type, float intensity) {
+            scheduler.amygdala_event_inject(evt_type, intensity);
+            scheduler.set_event_cortex_inject(evt_type, intensity);
+        };
         if (event_scheduler.load_jsonl(config.event_stream_path)) {
             event_stream_active = true;
             printf("[P1] 事件流已启用: %zu 个事件, 文件=%s\n",
@@ -1273,6 +1485,12 @@ int main(int argc, char** argv) {
                                           entry.ne_delta, entry.ht5_delta,
                                           entry.gaba_delta, entry.oxy_delta};
                         stage2e::set_event_signal(delta, 0);
+                        // Phase 3a-F (M1/M3): 事件→杏仁核 LA 注入 + 皮质醇应激累积
+                        scheduler.amygdala_event_inject(evt.event_type,
+                                                        static_cast<float>(evt.intensity));
+                        // Phase 3a-G (A): 事件→联合皮层直通注入 (rate 携带事件信息)
+                        scheduler.set_event_cortex_inject(evt.event_type,
+                                                          static_cast<float>(evt.intensity));
                         printf("[Curriculum-Event] step=%d (rel=%d) type=%d intensity=%d\n",
                                step, rel, evt.event_type, evt.intensity);
                     }
@@ -1315,6 +1533,11 @@ int main(int argc, char** argv) {
             //    由 scheduler 在注入点安全写入.
             embodied_env.compute_sensory_signals(sensory_signals);
             scheduler.set_embodied_sensory(sensory_signals);
+
+            // Phase 3a-H (M4): 脑岛内感受 (身体锚点) — 15 柱内感受 → 脑岛群体
+            float intero15[15];
+            embodied_env.body.encode_interoception(intero15);
+            scheduler.set_insula_sensory(intero15);
 
             // 2. 动作读出 (上一沙盒步的运动皮层输出)
             // 2026-08-01: 沙盒 V1 行为直读 L5→Motor 权重 (策略参数, REINFORCE 落地)

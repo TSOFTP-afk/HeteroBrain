@@ -45,7 +45,8 @@ void launch_synapse_nmda(MemoryAllocator* alloc, int step, int arrived_ring_idx,
 //   eta_multiplier: STDP eta 阶段倍率 (课程模式按发育阶段缩放, 非课程模式默认 1.0)
 void launch_stdp_dual_trace(MemoryAllocator* alloc, int step, float plasticity_gain,
                             int arrived_ring_idx, int arrived_count,
-                            float eta_multiplier = 1.0f);
+                            float eta_multiplier = 1.0f,
+                            float vta_rpe = 0.0f);  // Phase 3a-I (M2): VTA 发放差 (RPE)
 
 // Checkpoints keep the historical AoS representation. Materialize lazy
 // traces before saving, and reset transient epochs after loading.

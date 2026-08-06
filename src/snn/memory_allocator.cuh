@@ -182,6 +182,39 @@ struct PersistentBuffers {
     float*             d_l5_to_motor_weights = nullptr;     // 同上数量, 权重镜像
     int*               d_l5_to_motor_csr_row_ptr = nullptr; // [N_MOTOR_NEURONS + 1] = 5001
     int*               d_l5_to_motor_csr_col_idx = nullptr; // [N_MOTOR_NEURONS × L5_TO_MOTOR_SYNAPSES_PER_NEURON] = 250K
+
+    // ---------------------------------------------------------------------
+    // 杏仁核情感学习核心 (Phase 3a-F, M1, 2026-08-06) — 独立小模块
+    // ---------------------------------------------------------------------
+    // LA 输入侧 (事件分组) + BA 输出侧 (正/负性), 全连接 STDP 学习权重
+    // 显存: W 500×500×4B=1MB + 状态 ~20KB
+    float*             d_amyg_v_la = nullptr;         // [N_AMYGDALA_LA]
+    float*             d_amyg_v_ba = nullptr;         // [N_AMYGDALA_BA]
+    bool*              d_amyg_spike_la = nullptr;     // [N_AMYGDALA_LA]
+    bool*              d_amyg_spike_ba = nullptr;     // [N_AMYGDALA_BA]
+    float*             d_amyg_input_la = nullptr;     // [N_AMYGDALA_LA] 事件注入电流
+    float*             d_amyg_input_ba = nullptr;     // [N_AMYGDALA_BA] LA→BA 累积电流
+    float*             d_amyg_w_la_ba = nullptr;      // [N_AMYGDALA_LA × N_AMYGDALA_BA] STDP 学习权重
+    float*             d_amyg_trace_la = nullptr;     // [N_AMYGDALA_LA] STDP pre trace
+    float*             d_amyg_trace_ba = nullptr;     // [N_AMYGDALA_BA] STDP post trace
+
+    // ---------------------------------------------------------------------
+    // 脑岛内感受模块 (Phase 3a-H, M4, 2026-08-06) — 独立小模块
+    // ---------------------------------------------------------------------
+    // 5 维内感受 (hunger/temp/comfort/fatigue/pain) × 200 神经元, 无学习权重
+    // 显存: 3 × 1000 × (4B/1B) ≈ 12 KB
+    float*             d_insula_v = nullptr;          // [N_INSULA_NEURONS] 膜电位
+    bool*              d_insula_spike = nullptr;      // [N_INSULA_NEURONS] 发放标志
+    float*             d_insula_input = nullptr;      // [N_INSULA_NEURONS] 注入电流
+    unsigned int*      d_insula_accum = nullptr;      // [5] 窗口累计发放计数
+    // ---------------------------------------------------------------------
+    // VTA-DA 模块 (Phase 3a-I, M2, 2026-08-06) — 独立小模块
+    // ---------------------------------------------------------------------
+    // 正/负 RPE 各 500 神经元, 无学习权重, 显存: 4 × ~2KB
+    float*             d_vta_v = nullptr;             // [N_VTA_NEURONS] 膜电位
+    bool*              d_vta_spike = nullptr;         // [N_VTA_NEURONS] 发放标志
+    float*             d_vta_input = nullptr;         // [N_VTA_NEURONS] 注入电流
+    unsigned int*      d_vta_accum = nullptr;         // [2] 窗口累计发放计数
 };
 
 // -----------------------------------------------------------------------------

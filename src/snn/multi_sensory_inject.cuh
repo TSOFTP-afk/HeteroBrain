@@ -19,6 +19,17 @@ void launch_multi_sensory_inject(
     float* d_input_current,
     const ThalamicGateState* d_gate_states);
 
+// =============================================================================
+// Phase 3a-G (A): 事件→联合皮层直通注入 (2026-08-06)
+// =============================================================================
+// 根因修复: 事件调制对联合皮层传导 <2.3% (被文本流淹没) → readout 平均状态拟合器。
+// 事件类型 k → 联合皮层固定子区域 [k*REGION, (k+1)*REGION) 注入电流,
+// 与文本流 (感觉神经元路径) 并行互不覆盖; rate 携带事件信息后 readout 才有可学信号。
+// 时序: scheduler.step() 在 delay_inject (清零 input_current) 之后、lif_adex 之前调用;
+//   持续注入由 scheduler 按 EVENT_CORTEX_HOLD_STEPS 步控制 (每次调用注入一步)。
+// event_type ∈ [0, EVT_COUNT), gain = 调用方算好的电流增益 (强度已缩放)
+void launch_event_cortex_inject(int event_type, float gain, float* d_input_current);
+
 } // namespace stage2e
 
 #endif // SNN_MULTI_SENSORY_INJECT_CUH

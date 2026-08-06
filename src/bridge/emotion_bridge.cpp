@@ -61,6 +61,12 @@ void EmotionBridge::emit_embodied_reward(float reward) {
     }
 }
 
+void EmotionBridge::emit_world_event(int event_type, float intensity) {
+    if (snn_) {
+        snn_->emit_world_event(event_type, intensity);
+    }
+}
+
 int EmotionBridge::process_turn(const std::string& role, const std::string& text) {
     // ① 通知后端回合 (语义锚点回调)
     if (backend_) {

@@ -242,6 +242,9 @@ snn_stage2e_p1.exe `
 - ✅ PSW β 不单侧失控（β=0.212 < 0.4）
 - ✅ 工具判据已废弃（职责归 LLM 语义理解，w_tool=0，commit aa71f53）
 - ⚠️ 调质 MSE -50% 判据未达（0.0420 vs 目标 0.0339，差 19.3%）
+- **2026-08-06 判据重定义**：0.0339 基于失真监督数据（事件调制对联合皮层传导 <2.3%，readout=平均拟合器）定义，已失效。A（事件→联合皮层注入）实施后 readout 输入特征首次携带事件信息，判据改为两级：
+  1. **事件可辨性（第一判据）**：eval 输出 `[RateStat] event_subregion ratio`（事件子区域 avg 发放率 / 全皮层 avg），目标 ratio > 2 且 nz_evt 全子区域激活（80K 实测 social_loss=2.41 / criticism=1.57 已达标；offset 晚的事件因注入窗口仅 10 步被窗口累计稀释，ratio 会偏低）
+  2. **readout 可纠正性（第二判据）**：重训后 mod MSE 相对"冻结平均拟合器基线"（80K 冻结 continuous 口径 0.358 / 冷启动 0.232）显著下降，且 pred 范围摆脱 baseline 锁定（旧 pred 全样本 0.09-0.53）
 
 ### 10.5 待决策（上次对话遗留，未定）
 
@@ -265,9 +268,9 @@ snn_stage2e_p1.exe `
   ```powershell
   & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 160000 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --learning-rule n3f --bptt-window-size 400 --curriculum-lr 0.0100 --checkpoint-dir checkpoints/middle_1a --checkpoint-interval 10000 --keep-checkpoints 4 --csv build/snn/middle_1a_160k.csv --seed 42 --embodied --embodied-scene hunger_feeding --input-mode byte --text data/smoke_test.txt
   ```
-- **eval 命令模板**（120 样本，`--steps` 必须 > resume 步数；**必须带 `--bptt-window-size 400`**，否则窗口 50 步 < 事件 offset 100，事件永不注入，MSE 纯 baseline 失真——2026-08-04 修复）：
+- **eval 命令模板**（120 样本，`--steps` 必须 > resume 步数；**必须带 `--bptt-window-size 400`**，否则窗口 50 步 < 事件 offset 100，事件永不注入，MSE 纯 baseline 失真——2026-08-04 修复；**若训练用了 `--curriculum-continuous`，eval 必须同带**，否则 gtr 冷启动每样本复位，慢通道 Oxy 残留缺失，口径不一致——2026-08-06 实锤：3 样本 continuous 时 sample3 Oxy gtr=1.79 vs 冷启动 1.22）：
   ```powershell
-  & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a/ckpt_step140000.snn2e --steps 141000 --curriculum-eval --curriculum-eval-samples 120 --curriculum data/events/curriculum_middle_school.jsonl --curriculum-stage 1 --bptt-window-size 400 --checkpoint-dir checkpoints/middle_1a_eval --checkpoint-interval 0 --input-mode byte --text data/smoke_test.txt --seed 42
+  & .\build\snn\bin\snn_train.exe --resume checkpoints/middle_1a_longarc_all/ckpt_step80000.snn2e --steps 81200 --curriculum-eval --curriculum-eval-samples 120 --curriculum data/events/curriculum_all.jsonl --curriculum-stage 1 --curriculum-continuous --bptt-window-size 400 --checkpoint-dir checkpoints/middle_1a_longarc_all_eval --checkpoint-interval 0 --input-mode byte --text data/scripts/story_text_all.txt --seed 42
   ```
 - 训练约 140 ms/步 → 20K ≈ 47 min；120 样本 eval ≈ 13 min
 

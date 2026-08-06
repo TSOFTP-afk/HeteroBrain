@@ -196,6 +196,34 @@ size_t MemoryAllocator::allocate_all() {
     d_bufs_.d_l5_to_motor_csr_col_idx  = alloc<int>(n_l5_motor_syn,
                                                     "d_l5_to_motor_csr_col_idx", &total);
 
+    // -----------------------------------------------------------------
+    // 杏仁核情感学习核心 (Phase 3a-F, M1, 2026-08-06)
+    // W 500×500×4B = 1MB + 状态 ~20KB
+    // -----------------------------------------------------------------
+    d_bufs_.d_amyg_v_la      = alloc<float>(N_AMYGDALA_LA, "d_amyg_v_la", &total);
+    d_bufs_.d_amyg_v_ba      = alloc<float>(N_AMYGDALA_BA, "d_amyg_v_ba", &total);
+    d_bufs_.d_amyg_spike_la  = alloc<bool>(N_AMYGDALA_LA, "d_amyg_spike_la", &total);
+    d_bufs_.d_amyg_spike_ba  = alloc<bool>(N_AMYGDALA_BA, "d_amyg_spike_ba", &total);
+    d_bufs_.d_amyg_input_la  = alloc<float>(N_AMYGDALA_LA, "d_amyg_input_la", &total);
+    d_bufs_.d_amyg_input_ba  = alloc<float>(N_AMYGDALA_BA, "d_amyg_input_ba", &total);
+    d_bufs_.d_amyg_w_la_ba   = alloc<float>((size_t)N_AMYGDALA_LA * N_AMYGDALA_BA,
+                                            "d_amyg_w_la_ba (500×500)", &total);
+    d_bufs_.d_amyg_trace_la  = alloc<float>(N_AMYGDALA_LA, "d_amyg_trace_la", &total);
+    d_bufs_.d_amyg_trace_ba  = alloc<float>(N_AMYGDALA_BA, "d_amyg_trace_ba", &total);
+
+    // -----------------------------------------------------------------
+    // 脑岛内感受模块 (Phase 3a-H, M4, 2026-08-06) — 独立小模块
+    // -----------------------------------------------------------------
+    d_bufs_.d_insula_v      = alloc<float>(N_INSULA_NEURONS, "d_insula_v", &total);
+    d_bufs_.d_insula_spike  = alloc<bool>(N_INSULA_NEURONS, "d_insula_spike", &total);
+    d_bufs_.d_insula_input  = alloc<float>(N_INSULA_NEURONS, "d_insula_input", &total);
+    d_bufs_.d_insula_accum  = alloc<unsigned int>(5, "d_insula_accum", &total);
+    // VTA-DA 模块 (M2)
+    d_bufs_.d_vta_v         = alloc<float>(N_VTA_NEURONS, "d_vta_v", &total);
+    d_bufs_.d_vta_spike     = alloc<bool>(N_VTA_NEURONS, "d_vta_spike", &total);
+    d_bufs_.d_vta_input     = alloc<float>(N_VTA_NEURONS, "d_vta_input", &total);
+    d_bufs_.d_vta_accum     = alloc<unsigned int>(2, "d_vta_accum", &total);
+
     printf("  %-34s %10s %8s %10s %10s\n",
            "------", "-----", "----", "-----", "--------");
     printf("[Stage2e P0] 持久显存分配完成: %.2f MB (%.2f GB)\n",
@@ -297,6 +325,26 @@ void MemoryAllocator::free_all() {
     FREE_PTR(d_bufs_.d_l5_to_motor_weights);
     FREE_PTR(d_bufs_.d_l5_to_motor_csr_row_ptr);
     FREE_PTR(d_bufs_.d_l5_to_motor_csr_col_idx);
+    // 杏仁核缓冲释放
+    FREE_PTR(d_bufs_.d_amyg_v_la);
+    FREE_PTR(d_bufs_.d_amyg_v_ba);
+    FREE_PTR(d_bufs_.d_amyg_spike_la);
+    FREE_PTR(d_bufs_.d_amyg_spike_ba);
+    FREE_PTR(d_bufs_.d_amyg_input_la);
+    FREE_PTR(d_bufs_.d_amyg_input_ba);
+    FREE_PTR(d_bufs_.d_amyg_w_la_ba);
+    FREE_PTR(d_bufs_.d_amyg_trace_la);
+    FREE_PTR(d_bufs_.d_amyg_trace_ba);
+    // 脑岛缓冲释放
+    FREE_PTR(d_bufs_.d_insula_v);
+    FREE_PTR(d_bufs_.d_insula_spike);
+    FREE_PTR(d_bufs_.d_insula_input);
+    FREE_PTR(d_bufs_.d_insula_accum);
+    // VTA 缓冲释放
+    FREE_PTR(d_bufs_.d_vta_v);
+    FREE_PTR(d_bufs_.d_vta_spike);
+    FREE_PTR(d_bufs_.d_vta_input);
+    FREE_PTR(d_bufs_.d_vta_accum);
 
     #undef FREE_PTR
 

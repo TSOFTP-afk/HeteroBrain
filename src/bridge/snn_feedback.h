@@ -24,6 +24,12 @@ public:
     // (duration_steps: 0=单次脉冲, >0=plateau 型每 100 步递减)
     virtual void emit_event(const float modulator_delta[6], int duration_steps) = 0;
 
+    // 世界事件 (事件类型, 强度) → SNN 事件通道 (Phase 3a-G, 2026-08-06):
+    //   事件类型直通 SNN — 杏仁核 LA 注入 (M1) + 联合皮层子区域注入 (A),
+    //   强度 [-50, 50] 线性缩放。不做语义转换 (LLM 理解转化器属后续 spec);
+    //   调用方保证 event_type 落在 [0, EVT_COUNT) (事件类型见 src/snn/event_types.h)。
+    virtual void emit_world_event(int event_type, float intensity) = 0;
+
     // 外部奖励 → SNN set_embodied_reward
     virtual void emit_embodied_reward(float reward) = 0;
 };

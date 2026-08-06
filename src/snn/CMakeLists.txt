@@ -55,6 +55,9 @@ set(SNN_TRAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/decode_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/network_init.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_allocator.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/amygdala_kernels.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/insula_kernels.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/vta_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/input_encoding.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/run_config.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/event_scheduler.cpp

@@ -5,7 +5,7 @@
 #include "modulatory_kernels.cuh"
 #include "bptt_trainer.cuh"  // Task E1: BPTTConfig 用于 capture/restore BPTT 状态
 #include "bptt_curriculum.cuh"  // Phase 3a-D3: 课程 readout 权重 checkpoint 持久化
-
+#include "amygdala_kernels.cuh" // Phase 3a-F (M1): 杏仁核权重/状态持久化
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
@@ -190,7 +190,7 @@ std::vector<Section> SchedulerCheckpointAccess::make_sections(
     BioMechanismScheduler* self, SchedulerState* state) {
     PersistentBuffers& b = self->alloc_->buffers();
     std::vector<Section> s;
-    s.reserve(56);
+    s.reserve(64);
     add(&s, "scheduler_state", state, 1, sizeof(*state), false);
     add(&s, "neurons", b.d_neurons, N_TOTAL_NEURONS_2E, sizeof(NeuronStateAdEx));
     add(&s, "spike_flags", b.d_spike_flags, N_TOTAL_NEURONS_2E, sizeof(bool));
@@ -287,6 +287,16 @@ std::vector<Section> SchedulerCheckpointAccess::make_sections(
     // 2026-08-04 方案2: 浓度 readout 头权重 (6×6×4B = 144 B)
     //   放节表最末尾, 旧 checkpoint 缺失时 load 端随机初始化 (小值, 与训练初始一致)
     add(&s, "curriculum_conc_readout", b.d_curriculum_conc_weights, 6 * 6, sizeof(float));
+    // ==================== Phase 3a-F (M1/M3): 杏仁核 + HPA 皮质醇 ====================
+    // 放节表最末尾: 旧 checkpoint 缺失时 load 端整模块重新初始化 (init_amygdala,
+    //   随机权重 + 状态清零), 与冷启动初始一致; 皮质醇缺失则保持 0 (无慢性应激)
+    add(&s, "amygdala_w_la_ba", b.d_amyg_w_la_ba,
+        (uint64_t)N_AMYGDALA_LA * N_AMYGDALA_BA, sizeof(float));
+    add(&s, "amygdala_v_la", b.d_amyg_v_la, N_AMYGDALA_LA, sizeof(float));
+    add(&s, "amygdala_v_ba", b.d_amyg_v_ba, N_AMYGDALA_BA, sizeof(float));
+    add(&s, "amygdala_trace_la", b.d_amyg_trace_la, N_AMYGDALA_LA, sizeof(float));
+    add(&s, "amygdala_trace_ba", b.d_amyg_trace_ba, N_AMYGDALA_BA, sizeof(float));
+    add(&s, "cortisol", &self->h_cortisol_snapshot_, 1, sizeof(float), false);
     return s;
 }
 
@@ -338,6 +348,8 @@ SchedulerState SchedulerCheckpointAccess::capture_state(
     x.gate_open_ratio = self->gate_open_ratio_;
     x.runtime_state_valid = export_delay_queue_state(&x.delay_queue) ? 1 : 0;
     x.modulatory_runtime = export_modulatory_runtime_state();
+    // Phase 3a-F (M3): 皮质醇快照 (独立 section 持久化, 不动 SchedulerState 布局)
+    self->h_cortisol_snapshot_ = get_cortisol_level();
 
     // ==================== Task E1: BPTT 状态捕获 ====================
     x.bptt_enabled = self->bptt_enabled ? 1 : 0;
@@ -440,6 +452,10 @@ bool SchedulerCheckpointAccess::restore_state(BioMechanismScheduler* self,
         self->bptt_current_lr_ = x.bptt_current_lr;
         self->bptt_last_target_token_ = x.bptt_last_target_token;
     }
+
+    // Phase 3a-F (M3): 恢复 HPA 皮质醇快照 (由 cortisol section 读取到
+    //   h_cortisol_snapshot_, 再写入 modulatory_kernels 全局)
+    set_cortisol_level(self->h_cortisol_snapshot_);
 
     return delay_ok;
 }
@@ -696,6 +712,7 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
     //   decode_weights: 零初始化 (原兼容行为)
     //   curriculum readout: 随机小值 (与训练初始一致, 支持续训重新学习)
     PersistentBuffers& pb = alloc_->buffers();
+    bool amygdala_missing = false;   // 杏仁核节缺失 → 整模块重新初始化 (只做一次)
     for (const auto& name : missing_names) {
         if (name == "decode_weights") {
             const cudaError_t err = cudaMemset(pb.d_decode_weights, 0,
@@ -715,7 +732,16 @@ int BioMechanismScheduler::load_checkpoint(const char* path, int* next_step,
             // 2026-08-04 方案2: 只初始化浓度头 (6×6), 不触碰 mod/tool/pad 权重
             launch_curriculum_conc_readout_init(pb, 0.01f, 42u);
             std::printf("[Checkpoint] 警告: curriculum_conc_readout 未找到, 用随机小值初始化 (仅浓度头)\n");
+        } else if (name.rfind("amygdala_", 0) == 0) {
+            // Phase 3a-F (M1): 杏仁核节缺失 (旧 checkpoint) → 整模块重新初始化,
+            //   与冷启动一致 (随机权重 + 状态清零); 多个节只初始化一次
+            if (!amygdala_missing) {
+                init_amygdala(alloc_, state.topology_seed);
+                amygdala_missing = true;
+                std::printf("[Checkpoint] 警告: 杏仁核 sections 未找到, 用随机权重初始化\n");
+            }
         }
+        // cortisol 缺失: 无动作 (g_cortisol 保持构造期 0, 无慢性应激)
     }
     std::fclose(fp);
     if (!ok || state.state_version != 1 || state.state_bytes != sizeof(state)) return 7;

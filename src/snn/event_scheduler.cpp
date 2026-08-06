@@ -199,6 +199,11 @@ void EventScheduler::dispatch_pending(int current_step) {
         // 6. 注入到 modulatory 缓存 (累加模式, 同 step 多事件会叠加)
         set_event_signal(delta, duration_steps);
         event_count_this_step++;
+        // Phase 3a-F (M1): 事件→杏仁核 LA 注入 (与 set_event_signal 并列,
+        //   负性事件同时经 scheduler.amygdala_event_inject 累积皮质醇应激)
+        if (on_event_inject) {
+            on_event_inject(evt.event_type, static_cast<float>(evt.intensity));
+        }
 
         if (!evt.description.empty()) {
             const char* tag = (event_count_this_step > 1) ? "[Event-Superposed]" : "[Event]";

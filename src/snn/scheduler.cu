@@ -22,6 +22,9 @@
 #include "wm_kernels.cuh"
 #include "bptt_curriculum.cuh"
 #include "multi_sensory_inject.cuh"
+#include "amygdala_kernels.cuh"
+#include "insula_kernels.cuh"
+#include "vta_kernels.cuh"
 #include <cstdio>
 #include <cstring>
 #include <cmath>
@@ -529,6 +532,16 @@ void BioMechanismScheduler::step(int current_step) {
         launch_multi_sensory_inject(h_embodied_sensory_, buf.d_input_current, d_gate_states_);
         embodied_sensory_active_ = false;  // 单次注入 (每环境步由 main.cpp 重新设置)
     }
+    // Phase 3a-G (A): 事件→联合皮层直通注入 (与感知注入并列, delay_inject 清零之后、
+    //   lif_adex 之前)。事件类型 k → 联合皮层固定子区域持续 EVENT_CORTEX_HOLD_STEPS 步,
+    //   与文本流并行 — 让联合皮层发放率携带事件信息, readout 才有可学信号
+    if (h_event_cortex_hold_left_ > 0 && buf.d_input_current) {
+        ::stage2e::launch_event_cortex_inject(h_event_cortex_pending_type_,
+                                              h_event_cortex_pending_gain_,
+                                              buf.d_input_current);
+        --h_event_cortex_hold_left_;
+        if (h_event_cortex_hold_left_ <= 0) h_event_cortex_pending_type_ = -1;
+    }
     if (buf.d_prefrontal_input) {
         launch_merge_prefrontal_input(buf.d_prefrontal_input, buf.d_input_current,
                                       N_PREFRONTAL_NEURONS, N_ASSOCIATION_NEURONS_2E);
@@ -556,7 +569,8 @@ void BioMechanismScheduler::step(int current_step) {
     //    重算在 eval 期间持续修改突触权重 (评估样本间漂移, eval 非严格冻结)
     if (!weights_freeze_) {
         launch_stdp_dual_trace(alloc_, current_step, phase.plasticity_gain,
-                               arrived_ring_idx, arrived_count, stdp_eta_multiplier_);
+                               arrived_ring_idx, arrived_count, stdp_eta_multiplier_,
+                               h_vta_rpe_);   // Phase 3a-I (M2): VTA 发放差 (RPE)
     }
 
     // 6. STP 短期可塑性 (由延迟到达事件驱动)
@@ -582,6 +596,37 @@ void BioMechanismScheduler::step(int current_step) {
     //    时序: 在主网络完整更新 (含 delay_dispatch) 之后, 中时间尺度之前
     launch_l5_to_motor_synapse(alloc_);
     launch_motor_adex(alloc_, current_step, phase);
+
+    // 10. 杏仁核情感学习核心 (Phase 3a-F, M1): 独立小模块, 快时间尺度旁
+    //     LA 积分+发放 → BA 输入累积 → BA 积分+发放 (每步)
+    //     STDP 权重更新评估冻结时跳过 (与主网络权重冻结语义一致, B3)
+    launch_amygdala_forward(alloc_);
+    if (!weights_freeze_) {
+        launch_amygdala_stdp(alloc_);
+    }
+    // 10.5 杏仁核 BA 窗口累计 (每步): BA 发放窗口仅持续注入期 ~10 步,
+    //     与调制读取点 (mod_update_interval 倍数) 错位 → 每步把当前正/负性
+    //     发放率累加, 调制更新时读出窗口内情感反应强度并清零
+    {
+        float neg_t = 0.0f, pos_t = 0.0f;
+        ::stage2e::read_amygdala_ba_output(alloc_, &neg_t, &pos_t);
+        h_amyg_ba_neg_accum_ += neg_t;
+        h_amyg_ba_pos_accum_ += pos_t;
+    }
+
+    // 11. 脑岛内感受 (Phase 3a-H, M4): 持续注入当前内感受 + LIF 积分 (每步)
+    //     内感受是持续身体状态 (非脉冲), 每环境步 (100 SNN 步) 刷新缓存值,
+    //     此处在每次 step 注入当前缓存直到下次刷新
+    if (insula_active_) {
+        ::stage2e::launch_insula_inject(h_insula_dims_, alloc_);
+    }
+    ::stage2e::launch_insula_forward(alloc_);
+
+    // 12. VTA-DA (Phase 3a-I, M2): RPE 持续注入 + LIF 积分 (每步)
+    //     RPE 为调制窗口级状态, launch_modulatory 内每窗口更新注入强度缓存
+    //     (h_vta_rpe_inject_), 此处每步注入缓存值 + forward
+    ::stage2e::launch_vta_inject(h_vta_rpe_inject_, alloc_);
+    ::stage2e::launch_vta_forward(alloc_);
 
     // ==================== 中时间尺度 (每 10 步) ====================
     // P2 实现: camkii, eligibility, inhibitory_network
@@ -659,6 +704,22 @@ void BioMechanismScheduler::step(int current_step) {
                    aff.serotonin, aff.gaba, aff.oxytocin,
                    aff.pleasure, aff.arousal, aff.dominance,
                    aff.temperature_delta, aff.empathy_level, aff.confidence);
+            // Phase 3a-F (M1/M3): 杏仁核 BA 窗口累计 + HPA 皮质醇日志
+            //   BA_neg_w/BA_pos_w = 最近一调制窗口内正/负性组累计发放率
+            {
+                const float cort = ::stage2e::get_cortisol_level();
+                printf("[Amygdala] step=%6d  BA_neg_w=%.3f BA_pos_w=%.3f  cortisol=%.3f\n",
+                       current_step, h_amyg_ba_neg_last_, h_amyg_ba_pos_last_, cort);
+            }
+            // Phase 3a-H (M4): 脑岛内感受输出日志 (身体锚点)
+            //   窗口累计发放率; 读后清零 (launch_modulatory 内偏置 read 不清零 —
+            //   launch_modulatory 先于本块执行, 若其清零则日志读到 0)
+            if (insula_active_) {
+                float idim[5] = {0, 0, 0, 0, 0};
+                ::stage2e::read_insula_output(alloc_, idim, mod_update_interval, true);
+                printf("[Insula] step=%6d  hunger=%.3f temp_dev=%.3f comfort=%.3f fatigue=%.3f pain=%.3f\n",
+                       current_step, idim[0], idim[1], idim[2], idim[3], idim[4]);
+            }
         }
     }
 
@@ -912,10 +973,89 @@ void BioMechanismScheduler::launch_modulatory(int step) {
     float kl_div = 0.0f;  // P2 简化: NE 暂不触发
     const float* stage_baseline =
         curriculum_baseline_active_ ? curriculum_baseline_mod_ : nullptr;
+    // Phase 3a-F (M1): 杏仁核 BA 窗口累计 → 调质偏置 (正性→DA↑, 负性→NE↑)
+    //   仅训练模式 (weights_freeze_=false) 生效 — 评估模式的浓度监督目标
+    //   (concentration simulator) 不含杏仁核项, 注入会造成 readout 与 gtr
+    //   的系统性偏差; BA 发放率经 AMYGDALA_*_MOD 缩放后并入事件信号,
+    //   与课程事件同通道累加 (launch_modulatory 内一并读取)
+    {
+        const float ba_neg = h_amyg_ba_neg_accum_;
+        const float ba_pos = h_amyg_ba_pos_accum_;
+        h_amyg_ba_neg_last_ = ba_neg;   // 供 [Amygdala] 日志 (窗口累计)
+        h_amyg_ba_pos_last_ = ba_pos;
+        if (!weights_freeze_) {
+            if (ba_neg > 1e-4f || ba_pos > 1e-4f) {
+                float bias[6] = { AMYGDALA_DA_MOD * ba_pos,  // DA: 正性输出
+                                  0.0f,                       // ACh
+                                  AMYGDALA_NE_MOD * ba_neg,   // NE: 负性输出
+                                  0.0f, 0.0f, 0.0f };         // 5HT/GABA/Oxy
+                ::stage2e::set_event_signal(bias, 0);
+            }
+            // M1: 负性 BA 输出 → 皮质醇增益 (杏仁核学习驱动应激, 与事件应激叠加;
+            //   持续负性情感 → 慢轴应激累积, 即使事件已结束)
+            if (ba_neg > 0.05f) {
+                ::stage2e::set_cortisol_stress(ba_neg * AMYGDALA_CORTISOL_GAIN);
+            }
+        }
+        h_amyg_ba_neg_accum_ = 0.0f;   // 窗口结束, 清零 (无条件, 防评估期累积)
+        h_amyg_ba_pos_accum_ = 0.0f;
+    }
+    // Phase 3a-H (M4): 脑岛内感受 → 调质偏置 (身体不适→NE↑, 舒适→Oxy↑)
+    //   评估冻结时跳过 (与杏仁核偏置同语义); 脑岛输出为当前步发放率
+    //   (内感受持续注入, 非窗口事件), 直接读取即可
+    if (!weights_freeze_ && insula_active_) {
+        float idim[5] = {0, 0, 0, 0, 0};
+        // 窗口累计发放率, 读不清零 — 清零在 step() 日志块 (本函数先于日志执行,
+        // 若此处清零则日志 [Insula] 读到 0)
+        ::stage2e::read_insula_output(alloc_, idim, mod_update_interval, false);
+        // 不适 = (hunger + temp偏离 + fatigue + pain)/4 与 1-comfort 的均值
+        const float neg = 0.5f * ((idim[0] + idim[1] + idim[3] + idim[4]) * 0.25f) +
+                          0.5f * (1.0f - idim[2]);
+        const float pos = idim[2];
+        if (neg > 1e-3f || pos > 1e-3f) {
+            float ibias[6] = { 0.0f, 0.0f,                  // DA/ACh
+                               INSULA_NE_MOD * neg, 0.0f,   // NE: 身体不适
+                               0.0f, INSULA_OXY_MOD * pos };// 5HT/GABA/Oxy: 舒适
+            ::stage2e::set_event_signal(ibias, 0);
+        }
+    }
+    // Phase 3a-I (M2): VTA-DA RPE 神经化
+    //   1. 更新注入强度缓存 (本窗口 RPE): da_delta>0 (DA 上升=奖赏) → 正组;
+    //      预测误差 (预期落空) → 负组。下一窗口注入生效 (窗口级语义)。
+    //   2. 读 VTA 窗口累计发放率 (上一窗口注入的响应) → h_vta_rpe_ (STDP 用),
+    //      读后清零 (日志与 STDP 共用本值, 无二次 read)
+    //   评估冻结时跳过 (与杏仁核/脑岛偏置同语义, 防评估期累积)
+    if (!weights_freeze_) {
+        h_vta_rpe_inject_[0] = fmaxf(0.0f, da_delta) * VTA_POS_GAIN;
+        h_vta_rpe_inject_[1] = fmaxf(0.0f, prediction_error_norm) * VTA_NEG_GAIN;
+        float vout[2] = {0.0f, 0.0f};
+        ::stage2e::read_vta_output(alloc_, vout, mod_update_interval, true);
+        h_vta_rpe_ = vout[0] - vout[1];
+        printf("[VTA] step=%6d  rpe_pos=%.3f rpe_neg=%.3f  r_vta=%+.3f (注入 %+.3f / %.3f)\n",
+               step, vout[0], vout[1], h_vta_rpe_,
+               h_vta_rpe_inject_[0], h_vta_rpe_inject_[1]);
+    }
     ::stage2e::launch_modulatory(alloc_, step, reward, novelty, pred_succ, kl_div, da_delta,
                                   prediction_error_norm, 0.0f, stage_baseline,
                                   curriculum_baseline_active_,
                                   mod_update_interval);
+}
+
+// Phase 3a-F (M1/M3): 杏仁核事件注入 + 皮质醇应激累积
+//   事件 dispatch 方 (main.cpp 课程/事件循环) 在 set_event_signal 并列处调用
+void BioMechanismScheduler::amygdala_event_inject(int event_type, float intensity) {
+    ::stage2e::launch_amygdala_event_inject(alloc_, event_type, intensity);
+    // M3: 负性事件累积 HPA 皮质醇应激 (强度归一化, 慢轴在 launch_modulatory 内衰减)
+    ::stage2e::set_cortisol_stress(
+        ::stage2e::event_stress_level(event_type, static_cast<int>(intensity)));
+}
+
+void BioMechanismScheduler::read_amygdala_output(float* out_neg, float* out_pos) {
+    ::stage2e::read_amygdala_ba_output(alloc_, out_neg, out_pos);
+}
+
+float BioMechanismScheduler::cortisol_level() const {
+    return ::stage2e::get_cortisol_level();
 }
 
 void BioMechanismScheduler::launch_scaling(int step) {
@@ -2055,6 +2195,37 @@ void BioMechanismScheduler::n3f_embodied_step(float reward) {
 void BioMechanismScheduler::set_embodied_sensory(const float sensory[50]) {
     for (int i = 0; i < 50; ++i) h_embodied_sensory_[i] = sensory[i];
     embodied_sensory_active_ = true;
+}
+
+// Phase 3a-G (A): 事件→联合皮层直通注入
+//   强度 [0,50] → 增益 [0.5, 1.5]×EVENT_CORTEX_GAIN (与杏仁核/浓度通道同缩放),
+//   持续 EVENT_CORTEX_HOLD_STEPS 步由 step() 逐步注入
+void BioMechanismScheduler::set_event_cortex_inject(int event_type, float intensity) {
+    if (event_type < 0 || event_type >= EVT_COUNT) return;
+    float mag = intensity < 0 ? -intensity : intensity;
+    if (mag > 50.0f) mag = 50.0f;
+    h_event_cortex_pending_gain_ = EVENT_CORTEX_GAIN * (0.5f + 0.5f * mag / 50.0f);
+    h_event_cortex_pending_type_ = event_type;
+    h_event_cortex_hold_left_ = EVENT_CORTEX_HOLD_STEPS;
+}
+
+// Phase 3a-H (M4): 脑岛内感受刷新 — 15 柱 one-hot → 5 维强度
+//   intero15 布局 (embodied_body.h encode_interoception):
+//     [0-2]=hunger 低/中/高, [3-5]=temp 冷/中/热, [6-8]=comfort 低/中/高,
+//     [9-11]=fatigue 低/中/高, [12-14]=pain 低/中/高
+//   强度换算 (不适方向): hunger=中/高, temp偏离=冷或热, comfort高=正性,
+//   fatigue=中/高, pain=中/高
+void BioMechanismScheduler::set_insula_sensory(const float intero15[15]) {
+    h_insula_dims_[0] = 0.5f * intero15[1] + intero15[2];        // hunger 不适
+    h_insula_dims_[1] = intero15[3] + intero15[5];               // temp 偏离 (冷/热)
+    h_insula_dims_[2] = intero15[8];                             // comfort 高 (正性)
+    h_insula_dims_[3] = 0.5f * intero15[10] + intero15[11];      // fatigue
+    h_insula_dims_[4] = 0.5f * intero15[13] + intero15[14];      // pain
+    insula_active_ = true;
+}
+
+void BioMechanismScheduler::read_insula_output(float out[5]) {
+    ::stage2e::read_insula_output(alloc_, out, mod_update_interval, true);
 }
 
 } // namespace stage2e

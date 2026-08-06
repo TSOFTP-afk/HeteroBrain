@@ -70,4 +70,28 @@ void launch_multi_sensory_inject(
     cudaFree(d_sensory);
 }
 
+// =============================================================================
+// Phase 3a-G (A): 事件→联合皮层直通注入
+// =============================================================================
+
+// 事件类型 k → 联合皮层子区域 [start, start+region_size) 均匀注入电流
+//   简单均匀注入 (无哈希/无门控): 事件是"情感语义锚点", 整个子区域被激活,
+//   与文本流的柱级群体编码形成可区分的发放模式
+__global__ void event_cortex_inject_kernel(
+    float* __restrict__ input_current,
+    int start, int region_size, float gain)
+{
+    int i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= region_size) return;
+    input_current[start + i] += gain;
+}
+
+void launch_event_cortex_inject(int event_type, float gain, float* d_input_current) {
+    if (!d_input_current || event_type < 0 || event_type >= EVT_COUNT) return;
+    const int region = EVENT_CORTEX_REGION_SIZE;
+    const int start = event_type * region;
+    event_cortex_inject_kernel<<<(region + 255) / 256, 256>>>(
+        d_input_current, start, region, gain);
+}
+
 } // namespace stage2e

@@ -260,6 +260,10 @@ static float h_empathy_signal = 0.0f;
 //     - 同一 step 多个事件依次累加
 //     - launch_modulatory 读取后清零 (单次触发模型)
 static float h_event_signal[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+
+// Phase 3a-F (M3): HPA 应激慢轴 — 皮质醇 host 标量 (零显存)
+//   事件应激累积 → 慢衰减 (CORTISOL_TAU, 分钟级) → 调制 5HT/GABA 基线
+static float g_cortisol = 0.0f;
 static int   h_event_duration_steps = 0;  // 剩余持续步数 (0=单次脉冲)
 static int   h_event_pending_count = 0;    // 当前 step 累加的事件数
 
@@ -328,6 +332,26 @@ void set_event_signal(const float modulator_delta[6], int duration_steps) {
 // Phase 3a-C2: 查询当前 step 累加的事件数 (诊断用)
 int get_event_pending_count() {
     return h_event_pending_count;
+}
+
+// Phase 3a-F (M3): HPA 应激慢轴 (皮质醇) host 接口
+//   stress ∈ [0,1]: 事件应激量 (threat/criticism/social_loss → 高; praise/奖赏 → 0)
+//   应激累积: cortisol += stress * CORTISOL_STRESS_GAIN, 衰减在 launch_modulatory
+void set_cortisol_stress(float stress) {
+    if (stress < 0.0f) stress = 0.0f;
+    if (stress > 1.0f) stress = 1.0f;
+    g_cortisol += stress * CORTISOL_STRESS_GAIN;
+    if (g_cortisol > 1.0f) g_cortisol = 1.0f;
+}
+
+float get_cortisol_level() {
+    return g_cortisol;
+}
+
+void set_cortisol_level(float v) {
+    if (v < 0.0f) v = 0.0f;
+    if (v > 1.0f) v = 1.0f;
+    g_cortisol = v;
 }
 
 // Phase 3a-D1: 具身训练 reward + curiosity 接口
@@ -454,6 +478,15 @@ void launch_modulatory(MemoryAllocator* alloc, int step,
     float base_ach  = stage_baseline ? stage_baseline[3] : 0.2f;
     float base_gaba = stage_baseline ? stage_baseline[4] : GABA_BASE;
     float base_oxy  = stage_baseline ? stage_baseline[5] : OXYTOCIN_BASE;
+
+    // Phase 3a-F (M3): HPA 应激慢轴 — 皮质醇衰减 + 基线调制 (补分钟级时间尺度)
+    //   衰减: 每 mod_interval 步按 CORTISOL_TAU 指数衰减 (慢通道, 事件后恢复惯性)
+    //   调制: 慢性应激 → 5HT 基线下降 (抑郁模型) + GABA 基线上升 (代偿性抑制)
+    g_cortisol *= expf(-(float)mod_interval / CORTISOL_TAU);
+    if (g_cortisol > 0.0f) {
+        base_ht5  = fmaxf(0.0f, base_ht5  - g_cortisol * CORTISOL_HT5_MOD);
+        base_gaba = fminf(1.0f, base_gaba + g_cortisol * CORTISOL_GABA_MOD);
+    }
 
     // DA 信号 = 基线 + 预测误差耦合 + TD error 驱动
     // 课程模式 (deterministic): 关闭网络依赖动力学项, 浓度 = 阶段基线 + 事件

@@ -57,6 +57,9 @@ public:
     void emit_empathy(float level);
     void emit_event(const float modulator_delta[6], int duration_steps);
     void emit_embodied_reward(float reward);
+    // 世界事件 (事件类型, 强度) → 反馈端 emit_world_event (Phase 3a-G):
+    //   事件类型直通 SNN (杏仁核 LA 注入 + 联合皮层子区域注入), 强度 [-50,50]
+    void emit_world_event(int event_type, float intensity);
 
     // ---- LLM→SNN 语义锚点编排 ----
     // 处理一轮对话文本 (role: "user"/"assistant"):

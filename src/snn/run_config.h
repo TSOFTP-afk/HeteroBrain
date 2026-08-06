@@ -52,6 +52,7 @@ struct RunConfig {
                                         //   避免随机初始化 readout 的早期误差 (spec §7.7)
     bool curriculum_eval = false;       // --curriculum-eval 评估模式 (冻结权重, 统计工具/调质准确率)
     int  curriculum_eval_samples = 100; // --curriculum-eval-samples N 评估样本数
+    bool eval_emergent = false;         // --eval-emergent 情绪涌现诊断 (L1 事件扩散 / L2 readout 依赖 / L3 模式区分度)
                                         //   2026-08-01 spec §7.3: 默认 20 → 100
                                         //   (20 样本统计意义不足: 12 个 target=6 全对即可达 60% 准确率)
     bool curriculum_continuous = false; // --curriculum-continuous 连续课程模式
