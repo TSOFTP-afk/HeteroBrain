@@ -20,6 +20,7 @@
 #include "hippocampal_kernels.cuh"
 #include "coactivation_kernels.cuh"
 #include "wm_kernels.cuh"
+#include "cognitive_workbench.cuh"
 #include "bptt_curriculum.cuh"
 #include "multi_sensory_inject.cuh"
 #include "amygdala_kernels.cuh"
@@ -411,8 +412,13 @@ BioMechanismScheduler::BioMechanismScheduler(MemoryAllocator* alloc)
     // GPU 辅助缓冲: 供 compute_pca_signature / pca_back_project 调用 PCA kernel
     CUDA_CHECK_2E(cudaMalloc(&d_pca_fr_, N_ASSOCIATION_NEURONS_2E * sizeof(float)));
     CUDA_CHECK_2E(cudaMemset(d_pca_fr_, 0, N_ASSOCIATION_NEURONS_2E * sizeof(float)));
-    CUDA_CHECK_2E(cudaMalloc(&d_pca_mean_, N_ASSOCIATION_NEURONS_2E * sizeof(float)));
-    CUDA_CHECK_2E(cudaMemset(d_pca_mean_, 0, N_ASSOCIATION_NEURONS_2E * sizeof(float)));
+    // 2026-08-07 修复: 分配扩大到 N_TOTAL_NEURONS_2E (60000)
+    //   根因: 工作台读头 / WM 维持内核用全局神经元索引 (50000~54999 前额叶区间)
+    //   访问 d_pca_mean_[neuron_idx], 原只分配 50000 (联合皮层) → 越界 ~5000 元素
+    //   → 引擎启动第一步即触发 CUDA 非法内存访问. 扩大后前额叶区间访问到 0 (安全).
+    //   注意: h_mean_fr_ 仍只填前 50000, 同步 memcpy 只覆盖 50000, 其余保持 0.
+    CUDA_CHECK_2E(cudaMalloc(&d_pca_mean_, N_TOTAL_NEURONS_2E * sizeof(float)));
+    CUDA_CHECK_2E(cudaMemset(d_pca_mean_, 0, N_TOTAL_NEURONS_2E * sizeof(float)));
     // P0 修复: 同步打破对称性后的 h_pca_W_ 到 GPU d_pca_W (确保首次 compute_pca_signature 有效)
     {
         PersistentBuffers& buf = alloc_->buffers();
@@ -426,6 +432,9 @@ BioMechanismScheduler::BioMechanismScheduler(MemoryAllocator* alloc)
     // Task 4-5: 睡眠重放临时缓冲
     CUDA_CHECK_2E(cudaMalloc(&d_replay_sig_, PCA_N_COMPONENTS * sizeof(float)));
     CUDA_CHECK_2E(cudaMalloc(&d_replay_recon_, N_ASSOCIATION_NEURONS_2E * sizeof(float)));
+    // Phase 3b: 工作台情感印记 GPU 缓存 (6 维)
+    CUDA_CHECK_2E(cudaMalloc(&d_wb_emotion_, WB_EMOTION_DIM * sizeof(float)));
+    CUDA_CHECK_2E(cudaMemset(d_wb_emotion_, 0, WB_EMOTION_DIM * sizeof(float)));
     // Task 8: 结构可塑性临时缓冲
     CUDA_CHECK_2E(cudaMalloc(&d_new_synapse_pairs_, 2 * COACT_MAX_NEW_SYNAPSES * sizeof(int)));
     CUDA_CHECK_2E(cudaMalloc(&d_new_synapse_count_, sizeof(int)));
@@ -460,6 +469,7 @@ BioMechanismScheduler::~BioMechanismScheduler() {
     // Task 4-5: 释放睡眠重放临时缓冲
     if (d_replay_sig_) cudaFree(d_replay_sig_);
     if (d_replay_recon_) cudaFree(d_replay_recon_);
+    if (d_wb_emotion_) cudaFree(d_wb_emotion_);
     // Task 8: 释放结构可塑性临时缓冲
     if (d_new_synapse_pairs_) cudaFree(d_new_synapse_pairs_);
     if (d_new_synapse_count_) cudaFree(d_new_synapse_count_);
@@ -546,6 +556,11 @@ void BioMechanismScheduler::step(int current_step) {
     if (buf.d_prefrontal_input) {
         launch_merge_prefrontal_input(buf.d_prefrontal_input, buf.d_input_current,
                                       N_PREFRONTAL_NEURONS, N_ASSOCIATION_NEURONS_2E);
+    }
+    // Phase 3b: 工作台前额叶注入合并 (与 WM 同构, 滞后一步模式)
+    if (buf.d_wb_prefrontal_input) {
+        launch_merge_wb_prefrontal_input(buf.d_wb_prefrontal_input, buf.d_input_current,
+                                         N_PREFRONTAL_NEURONS, N_ASSOCIATION_NEURONS_2E);
     }
 
     // 3. AdEx 神经元更新 (产生 spike_flags)
@@ -733,6 +748,9 @@ void BioMechanismScheduler::step(int current_step) {
     //   d_prefrontal_input (阶段1 WM 写入内部已有 %WM_WRITE_INTERVAL 门控, 节奏不变),
     //   合并注入的是当前步新值, 电流量级正常, PCA 恢复稳定.
     launch_wm_update(current_step);
+
+    // Phase 3b: 认知工作台更新 (256 槽认知工作空间, 逐槽读写擦 + 读写头注入)
+    launch_wb_update(current_step);
 
     // ==================== Task 2: PCA 增量更新 (每 PCA_UPDATE_INTERVAL 步) ====================
     // warmup 期 (step <= PCA_WARMUP_STEPS) 不更新, 等发放率稳定
@@ -1104,6 +1122,58 @@ void BioMechanismScheduler::launch_wm_update(int step) {
     if (activity_drive < 0.0f) activity_drive = 0.0f;
     p3_last_activity_drive_ = activity_drive;
     p3_wm_updates_++;
+}
+
+// =============================================================================
+// Phase 3b: 认知工作台更新 (认知工作空间 Layer 2)
+// =============================================================================
+// 与 WM 相似但独立: 256 槽, 逐槽读写擦 (读写头), 带类型标签/情感印记/时间戳/写保护.
+//   - 阶段1 (每 WB_WRITE_INTERVAL 步): PCA 签名匹配, 新颖→写入未保护槽 (情感印记快照)
+//   - 阶段2 (每步): activation *= WB_DECAY (指数遗忘)
+//   - 阶段3 (每步): 读头 softmax 注意力 → d_wb_read_attn + 重建签名 d_wb_read_signal
+//                   + 活跃槽 PCA 反投影注入 d_wb_prefrontal_input
+// 注: d_wb_prefrontal_input 的 merge 到 input_current 在 step() 内 delay_inject 之后
+//     单独调用 (与 WM 相同的滞后一步模式). 本函数每步清零后重写该缓冲.
+// =============================================================================
+void BioMechanismScheduler::launch_wb_update(int step) {
+    PersistentBuffers& buf = alloc_->buffers();
+    if (!buf.d_wb_slots) return;
+
+    // === 阶段 0: 清零工作台注入缓冲 (与 WM 的 d_prefrontal_input 同构) ===
+    if (buf.d_wb_prefrontal_input) {
+        CUDA_CHECK_2E(cudaMemsetAsync(buf.d_wb_prefrontal_input, 0,
+                                       N_PREFRONTAL_NEURONS * sizeof(float)));
+    }
+
+    // === 阶段 1: 工作台写入 (每 WB_WRITE_INTERVAL 步) ===
+    if (step > PCA_WARMUP_STEPS && step % WB_WRITE_INTERVAL == 0) {
+        compute_pca_signature(d_replay_sig_);
+        // 情感印记: 当前 6 维调质浓度快照 [DA,ACh,NE,5HT,GABA,Oxy]
+        // 2026-08-07 修复: conc() 返回 host 指针, 先拷贝到 GPU 缓存 d_wb_emotion_
+        //   再传给内核 (原直接把 host 指针当 device 指针 → CUDA 非法访问)
+        const float* conc = curriculum_mod_sim_.conc();
+        if (d_wb_emotion_ && conc) {
+            CUDA_CHECK_2E(cudaMemcpy(d_wb_emotion_, conc,
+                                     WB_EMOTION_DIM * sizeof(float),
+                                     cudaMemcpyHostToDevice));
+        }
+        launch_wb_write(buf.d_wb_slots, d_replay_sig_, d_wb_emotion_,
+                        buf.d_wb_write_cursor, step,
+                        WB_CAPACITY, WB_NOVELTY_THRESHOLD, SlotTag::FACT);
+    }
+
+    // === 阶段 2: 工作台维持 (每步衰减) ===
+    launch_wb_maintain(buf.d_wb_slots, WB_CAPACITY, WB_DECAY);
+
+    // === 阶段 3: 工作台读头 (注意力 + 重建签名 + 注入) ===
+    launch_wb_read_head(buf.d_wb_slots, buf.d_pca_W, d_pca_mean_,
+                        buf.d_wb_read_attn, buf.d_wb_read_signal,
+                        buf.d_wb_prefrontal_input, WB_CAPACITY,
+                        N_PREFRONTAL_NEURONS, NEURONS_PER_PF_GROUP,
+                        WB_INJECT_GAIN, PCA_N_COMPONENTS,
+                        N_ASSOCIATION_NEURONS_2E + N_PREFRONTAL_NEURONS);
+
+    wb_updates_++;
 }
 
 // ==================== P3-C 语义聚类评估 ====================

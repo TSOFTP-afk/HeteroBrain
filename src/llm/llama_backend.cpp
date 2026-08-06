@@ -41,6 +41,23 @@ const char* kRoleRule =
     "持续演算你的情绪状态(愉悦/唤醒/主导/共情), Qwen 大语言模型负责文字表达, "
     "你的语气与措辞会实时反映当前情绪基调。请直接给出回答。";
 
+// 声明式工具调用协议: 提取回复中所有 <tool_call>JSON</tool_call> 块。
+// 返回每个块的完整 JSON 字符串 ({"name":..,"args":{..}}), 由引擎解析执行。
+void extract_tool_calls(const std::string& text, std::vector<std::string>& out) {
+    const std::string open  = "<tool_call>";
+    const std::string close = "</tool_call>";
+    size_t pos = 0;
+    while (true) {
+        size_t s = text.find(open, pos);
+        if (s == std::string::npos) break;
+        const size_t content = s + open.size();
+        size_t e = text.find(close, content);
+        if (e == std::string::npos) break;
+        out.push_back(text.substr(content, e - content));
+        pos = e + close.size();
+    }
+}
+
 }  // namespace
 
 LlamaBackend::LlamaBackend(Options opt) : opt_(std::move(opt)) {
@@ -178,6 +195,75 @@ void LlamaBackend::on_assistant_turn(const std::string& text) {
 
 void LlamaBackend::clear_history() {
     history_.clear();
+}
+
+int LlamaBackend::chat_tools(
+    const std::string& user_text, std::string& response,
+    const std::function<std::string(const std::string&)>& tool_callback,
+    int max_turns) {
+    if (!is_loaded()) {
+        return -1;
+    }
+
+    // 当前 user 消息入历史 (与 chat() 一致的去重)
+    const bool user_in_history = !history_.empty() &&
+                                 history_.back().first == "user" &&
+                                 history_.back().second == user_text;
+    if (!user_in_history) {
+        history_.emplace_back("user", user_text);
+    }
+
+    for (int turn = 0; turn < max_turns; ++turn) {
+        // 每轮全量重建 prompt (情感 system + 历史, 含 tool 角色消息)
+        llama_memory_clear(llama_get_memory(ctx_), true);
+        std::string prompt;
+        if (!emotion_snippet_.empty()) {
+            prompt += "<|im_start|>system\n" + std::string(kRoleRule) + "\n" +
+                      emotion_snippet_ + "<|im_end|>\n";
+        } else {
+            prompt += "<|im_start|>system\n" + std::string(kRoleRule) + "<|im_end|>\n";
+        }
+        for (const auto& h : history_) {
+            prompt += "<|im_start|>" + h.first + "\n" + h.second + "<|im_end|>\n";
+        }
+        prompt += "<|im_start|>assistant\n";
+
+        std::string resp;
+        const int rc = generate(prompt, resp);
+        if (rc != 0) {
+            return rc;
+        }
+
+        // 解析本轮回复中的工具调用
+        std::vector<std::string> calls;
+        extract_tool_calls(resp, calls);
+        if (calls.empty()) {
+            // 无工具调用 → 最终回复
+            response = resp;
+            if (history_.empty() || history_.back().first != "assistant" ||
+                history_.back().second != resp) {
+                history_.emplace_back("assistant", resp);
+            }
+            return 0;
+        }
+
+        // 有工具调用: 记录 assistant 消息 (含 <tool_call> 块), 执行工具并回填 tool 结果
+        history_.emplace_back("assistant", resp);
+        std::string results;
+        for (const auto& c : calls) {
+            std::string r = tool_callback ? tool_callback(c) : std::string();
+            if (r.empty()) {
+                r = "(工具执行失败或未返回)";
+            }
+            results += r;
+            results += "\n";
+        }
+        history_.emplace_back("tool", results);
+    }
+
+    // 达到 max_turns 上限仍无最终回复
+    response = "(达到工具调用轮数上限，未能给出最终回复)";
+    return 0;
 }
 
 int LlamaBackend::warmup() {

@@ -123,6 +123,15 @@ size_t MemoryAllocator::allocate_all() {
     d_bufs_.d_prefrontal_input  = alloc<float>(N_PREFRONTAL_NEURONS,
                                                 "d_prefrontal_input (5K)", &total);
 
+    // --- Phase 3b: 认知工作台 (认知工作空间 Layer 2) ---
+    // alloc() 已 cudaMemset 为 0: 槽位全零 (tag==UNUSED), 游标=0, 注意力/签名/注入缓冲全 0
+    d_bufs_.d_wb_slots            = alloc<WorkbenchSlot>(WB_CAPACITY, "d_wb_slots (256)", &total);
+    d_bufs_.d_wb_write_cursor     = alloc<int>(1, "d_wb_write_cursor (LRU)", &total);
+    d_bufs_.d_wb_read_attn        = alloc<float>(WB_CAPACITY, "d_wb_read_attn (读头)", &total);
+    d_bufs_.d_wb_read_signal      = alloc<float>(WB_SIGNATURE_DIM, "d_wb_read_signal (重建签名)", &total);
+    d_bufs_.d_wb_prefrontal_input = alloc<float>(N_PREFRONTAL_NEURONS,
+                                                  "d_wb_prefrontal_input (5K)", &total);
+
     // --- DA 价值函数相关 ---
     d_bufs_.d_subcolumn_fr      = alloc<float>(W_VALUE_DIM, "d_subcolumn_fr", &total);
     d_bufs_.d_baseline_fr       = alloc<float>(W_VALUE_DIM, "d_baseline_fr", &total);
@@ -296,6 +305,12 @@ void MemoryAllocator::free_all() {
     // Task 9: WM 完整闭环缓冲释放
     FREE_PTR(d_bufs_.d_wm_write_cursor);
     FREE_PTR(d_bufs_.d_prefrontal_input);
+    // Phase 3b: 认知工作台缓冲释放
+    FREE_PTR(d_bufs_.d_wb_slots);
+    FREE_PTR(d_bufs_.d_wb_write_cursor);
+    FREE_PTR(d_bufs_.d_wb_read_attn);
+    FREE_PTR(d_bufs_.d_wb_read_signal);
+    FREE_PTR(d_bufs_.d_wb_prefrontal_input);
     FREE_PTR(d_bufs_.d_subcolumn_fr);
     FREE_PTR(d_bufs_.d_baseline_fr);
     FREE_PTR(d_bufs_.d_w_pred);

@@ -80,6 +80,14 @@ private:
     // 构建 SNN 记忆片段 (工作记忆 + 海马 + 最近对话), 追加到 system prompt
     std::string build_memory_snippet();
 
+    // ---- 认知工作台工具 (Phase 3b 双模态, LLM 可读写) ----
+    // 工具协议定义 (system prompt 片段, 描述 read_workbench/write_workbench/
+    // search_workbench 及 <tool_call>JSON</tool_call> 调用格式)
+    std::string tool_system_snippet();
+    // 执行一次工具调用: 解析完整 <tool_call> JSON → 分发 read/write/search →
+    // 返回工具结果文本 (供 chat_tools 回填)
+    std::string execute_workbench_tool(const std::string& json_call);
+
     Options   opt_;
     bool      ready_ = false;
     SnnState* snn_ = nullptr;              // SNN 内部状态 (engine.cpp 定义)

@@ -69,12 +69,12 @@
 **训练范式权威契约**：[docs/developmental-training-master-spec.md](file:///f:/thetrueai/docs/developmental-training-master-spec.md)
 
 - [~] **3a 情感核心**（进行中）：6 维调质向量（DA/5HT/NE/ACh/GABA/催产素）✅ + AffectiveState readout ✅ + synapse 6 维 M_ij 门控 ✅ + 250 步合成输入验证 ✅ + 稳态补偿 ✅；待做：真实文字训练验证 + LLM 调制接口接入 + **事件驱动调质注入接口**（当前情绪无语义锚点，§3.4）
-- [ ] **3b 认知黑板**：256 槽 BlackboardSlot + 读写头（替代原 50 槽 WM）+ 类型标签（FACT/CONCEPT/RELATION/GOAL/HYPOTHESIS/SCRATCH/ANCHOR）+ **事件驱动调质注入**（launch_modulatory 加 inject_event + 基因硬编码映射表，与黑板一并实现避免重复改接口，§3.4）
-- [ ] **3c 黑板-LLM 桥接**：embedding 双向（bge-small-zh 512 维）+ 导出 prompt
-- [ ] **3d 工具编排核心**：6 工具集（Transformer 生成器/计算器/草稿记录器/长程检索器/知识库查询/时钟）+ 状态驱动调用信号 + 黑板联动
+- [ ] **3b 认知工作台**：256 槽 WorkbenchSlot + 读写头（替代原 50 槽 WM）+ 类型标签（FACT/CONCEPT/RELATION/GOAL/HYPOTHESIS/SCRATCH/ANCHOR）+ **事件驱动调质注入**（launch_modulatory 加 inject_event + 基因硬编码映射表，与工作台一并实现避免重复改接口，§3.4）
+- [ ] **3c 工作台-LLM 桥接**：embedding 双向（bge-small-zh 512 维）+ 导出 prompt
+- [ ] **3d 工具编排核心**：6 工具集（Transformer 生成器/计算器/草稿记录器/长程检索器/知识库查询/时钟）+ 状态驱动调用信号 + 工作台联动
 - [ ] **3e 工具调用训练**：模仿学习冷启动 + RL 微调（复用现有 DA 价值函数 + PSW 贝叶斯突触做 reward 闭环）
   - 注：DA 信号当前来自内部 TD error，事件驱动注入后 DA 将叠加外部事件奖赏（如 hunt_success→DA↑，§3.4）
-- [ ] **3f 黑板-海马溢出**：短期→长期固化 + 情感印记（HippoIndex 加 emotion_tag/user_id/real_timestamp 字段）
+- [ ] **3f 工作台-海马溢出**：短期→长期固化 + 情感印记（HippoIndex 加 emotion_tag/user_id/real_timestamp 字段）
 - [ ] **3g 端到端验证**：情感轨迹可视化 + 多步推理 demo + 工具调用流
 - [ ] **里程碑**：SNN 在跨轮次情感维持 + 多步推理 + 工具调度上展现出 LLM+RAG 做不到的能力
 

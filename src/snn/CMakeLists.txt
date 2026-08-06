@@ -52,6 +52,7 @@ set(SNN_TRAIN_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/pca_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/thalamic_gate.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/wm_kernels.cu
+    ${CMAKE_CURRENT_SOURCE_DIR}/cognitive_workbench.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/decode_kernels.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/network_init.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/memory_allocator.cu

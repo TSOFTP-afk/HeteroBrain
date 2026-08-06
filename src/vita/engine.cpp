@@ -20,6 +20,7 @@
 #include "modulatory_kernels.cuh"   // get_affective_state / set_event_signal 等
 #include "input_encoding.cuh"       // load_text_corpus (resume 指纹校验) / append_text_stream
 #include "wm_kernels.cuh"           // read_wm_slots (工作记忆读出)
+#include "cognitive_workbench.cuh" // read_wb_slots (认知工作台读出, Phase 3b)
 #include "hippocampal_kernels.cuh"  // read_hippo_memories (海马记忆读出)
 
 #include "http_server.h"            // OpenAI 兼容 serve 模式
@@ -87,6 +88,20 @@ bridge::EmotionState to_emotion_state(const stage2e::AffectiveState& a) {
     e.step              = a.step;
     e.confidence        = a.confidence;
     return e;
+}
+
+// 工作台槽位类型标签 → 可读名 (LLM 工具结果格式化用)
+const char* slot_tag_name(uint8_t tag) {
+    switch ((SlotTag)tag) {
+        case SlotTag::FACT:       return "事实";
+        case SlotTag::CONCEPT:    return "概念";
+        case SlotTag::RELATION:   return "关系";
+        case SlotTag::GOAL:       return "目标";
+        case SlotTag::HYPOTHESIS: return "假设";
+        case SlotTag::SCRATCH:    return "草稿";
+        case SlotTag::ANCHOR:     return "锚点";
+        default:                  return "空";
+    }
 }
 
 // OpenAI 风格错误响应体
@@ -252,9 +267,17 @@ int EmotionEngine::run() {
 
         snn_and_mood(user);
 
-        // ④ LLM 生成 (CMD 模式: 引擎内部历史)
+        // ④ LLM 生成 (CMD 模式: 引擎内部历史, 支持认知工作台工具调用)
+        //    工具循环: 模型输出 <tool_call> → 引擎执行工作台工具 → 结果以 tool
+        //    角色回填 → 模型基于结果生成最终回复 (最多 4 轮)。
         std::string resp;
-        if (llm_->chat(user, resp) != 0) {
+        const int rc = llm_->chat_tools(
+            user, resp,
+            [this](const std::string& call) {
+                return execute_workbench_tool(call);
+            },
+            4);
+        if (rc != 0) {
             std::fprintf(stderr, "[engine] LLM generation failed\n");
             continue;
         }
@@ -322,9 +345,11 @@ void EmotionEngine::snn_and_mood(const std::string& user_msg) {
     if (opt_.ablate_prompt) {
         llm_->apply_emotion_prompt(kNeutralEmotionPrompt);  // 冻结中性情绪文字
     } else {
-        // 情绪基调 + SNN 记忆片段 (工作记忆/海马/最近对话) 一并注入
+        // 情绪基调 + SNN 记忆片段 (工作记忆/海马/工作台文本/最近对话)
+        //   + 认知工作台工具协议 (LLM 可 read/write/search 工作台, Phase 3b)
         llm_->apply_emotion_prompt(bridge_.build_system_prompt_snippet() +
-                                   build_memory_snippet());
+                                   build_memory_snippet() +
+                                   tool_system_snippet());
     }
 
     const auto& p = llm_->sampler_params();   // 打印实际生效的参数 (消融时可见默认值)
@@ -419,6 +444,44 @@ std::string EmotionEngine::build_memory_snippet() {
             }
         }
     }
+    // 认知工作台 (Phase 3b): activation 降序取 top WB_READ_TOP_SLOTS
+    std::vector<WorkbenchSlot> bb;
+    if (buf.d_wb_slots) {
+        bb = stage2e::read_wb_slots(buf.d_wb_slots, WB_CAPACITY, WB_READ_TOP_SLOTS);
+    }
+    int wb_active = 0;
+    for (const auto& b : bb) {
+        if (b.tag != (uint8_t)SlotTag::UNUSED && b.activation > 0.1f) {
+            ++wb_active;
+        }
+    }
+    if (wb_active > 0) {
+        out += "\n认知工作台：";
+        int shown = 0;
+        for (const auto& b : bb) {
+            if (b.tag == (uint8_t)SlotTag::UNUSED || b.activation <= 0.1f) {
+                continue;
+            }
+            if (shown >= 3) {
+                break;
+            }
+            char ab[16];
+            std::snprintf(ab, sizeof(ab), "%.2f", b.confidence);
+            // 双模态: SNN 签名槽位同时携带 LLM 可读文本 (若存在)
+            std::string bt(b.text, b.text + WB_TEXT_CAPACITY);
+            const size_t bz = bt.find('\0');
+            if (bz != std::string::npos) {
+                bt.resize(bz);
+            }
+            out += "\n- 槽[" + std::to_string(shown + 1) + "] 类型=" +
+                   std::string(slot_tag_name(b.tag)) + " 置信=" + std::string(ab) +
+                   " 步=" + std::to_string(b.timestamp);
+            if (!bt.empty()) {
+                out += " 文本=" + bt;
+            }
+            ++shown;
+        }
+    }
     if (!recent_dialog_.empty()) {
         out += "。你最近记住的用户话语：";
         for (const auto& msg : recent_dialog_) {
@@ -460,9 +523,159 @@ std::string EmotionEngine::build_memory_snippet() {
             std::printf("]");
         }
         std::printf(" 回显=%zu条\n", recent_dialog_.size());
+        std::printf(" 工作台活跃=%d/%d 读头top=%zu\n", wb_active, WB_CAPACITY, bb.size());
         std::fflush(stdout);
     }
     return out;
+}
+
+// -----------------------------------------------------------------------------
+// 认知工作台工具 (Phase 3b 双模态, LLM 经工具读写工作台)
+// -----------------------------------------------------------------------------
+
+// 工具协议定义 (追加到 system prompt): 描述 read/write/search + <tool_call> 格式
+std::string EmotionEngine::tool_system_snippet() {
+    return
+        "\n\n你可以访问一个共享的'认知工作台'来暂存推理草稿与关键信息。"
+        "工作台是双模态的——SNN 的神经签名与你的文本共存于同一槽位。可用工具:\n"
+        "- read_workbench: 读取当前最活跃的工作台槽位. "
+        "args: {\"max_results\"?: int(默认5)}. 返回槽位文本+类型+置信度.\n"
+        "- write_workbench: 把一条信息写入工作台. "
+        "args: {\"text\": string(必填), \"tag\"?: string(可选, "
+        "fact|concept|relation|goal|hypothesis|scratch|anchor, 默认scratch), "
+        "\"index\"?: int(可选指定槽号), \"protect\"?: bool(可选, 写保护防替换)}. "
+        "返回写入的槽号.\n"
+        "- search_workbench: 按子串搜索工作台. "
+        "args: {\"query\": string(搜索文本), \"max_results\"?: int(默认5)}. "
+        "返回匹配的槽位.\n"
+        "调用格式: 在回复中输出 <tool_call>{\"name\":\"..\",\"args\":{..}}</tool_call>, "
+        "然后在后续消息中基于工具结果给出最终回答。若无需工具, 直接给出回答。";
+}
+
+// 执行一次工具调用: 解析 JSON → 分发 read/write/search → 返回结果文本
+std::string EmotionEngine::execute_workbench_tool(const std::string& json_call) {
+    if (!snn_ || !snn_->allocator) {
+        return "(工作台不可用)";
+    }
+    auto& buf = snn_->allocator->buffers();
+    if (!buf.d_wb_slots) {
+        return "(工作台未初始化)";
+    }
+    const int n_slots = WB_CAPACITY;
+
+    json::Value call;
+    std::string jerr;
+    if (!json::parse(json_call, call, &jerr)) {
+        return "(工具调用解析失败: " + jerr + ")";
+    }
+    const json::Value* name_v = call.find("name");
+    if (!name_v) {
+        return "(缺少工具名)";
+    }
+    const std::string name = name_v->as_str();
+    const json::Value* args_v = call.find("args");
+
+    // ---- read_workbench: 读最活跃槽位 ----
+    if (name == "read_workbench") {
+        int maxr = 5;
+        if (args_v) {
+            const json::Value* m = args_v->find("max_results");
+            if (m && m->type == json::Value::kNum) maxr = (int)m->as_num();
+        }
+        auto slots = stage2e::read_wb_slots(buf.d_wb_slots, n_slots, maxr);
+        std::string out = "工作台内容 (按活跃度):";
+        int shown = 0;
+        for (const auto& s : slots) {
+            if (s.tag == (uint8_t)SlotTag::UNUSED) continue;
+            ++shown;
+            char cb[16];
+            std::snprintf(cb, sizeof(cb), "%.2f", s.confidence);
+            std::string text(s.text, s.text + WB_TEXT_CAPACITY);
+            const size_t z = text.find('\0');
+            if (z != std::string::npos) text.resize(z);
+            out += "\n- [" + std::string(slot_tag_name(s.tag)) + "] 置信" +
+                   std::string(cb) + ": ";
+            out += text.empty() ? "(无文本)" : text;
+        }
+        if (!shown) out += " (空)";
+        return out;
+    }
+
+    // ---- write_workbench: 写文本到工作台 (可指定槽号, 否则自动找可写槽) ----
+    if (name == "write_workbench") {
+        if (!args_v) {
+            return "(write_workbench 缺少 args)";
+        }
+        const json::Value* text_v = args_v->find("text");
+        const std::string text = text_v ? text_v->as_str() : std::string();
+        uint8_t tag = (uint8_t)SlotTag::SCRATCH;
+        const json::Value* tag_v = args_v->find("tag");
+        if (tag_v && tag_v->type == json::Value::kStr) {
+            const std::string t = tag_v->as_str();
+            if (t == "fact")        tag = (uint8_t)SlotTag::FACT;
+            else if (t == "concept") tag = (uint8_t)SlotTag::CONCEPT;
+            else if (t == "relation") tag = (uint8_t)SlotTag::RELATION;
+            else if (t == "goal")    tag = (uint8_t)SlotTag::GOAL;
+            else if (t == "hypothesis") tag = (uint8_t)SlotTag::HYPOTHESIS;
+            else if (t == "anchor")  tag = (uint8_t)SlotTag::ANCHOR;
+            else                     tag = (uint8_t)SlotTag::SCRATCH;
+        }
+        uint8_t protect = 0;
+        const json::Value* prot_v = args_v->find("protect");
+        if (prot_v && prot_v->type == json::Value::kBool && prot_v->as_bool()) {
+            protect = 1;
+        }
+        int idx = -1;
+        const json::Value* idx_v = args_v->find("index");
+        if (idx_v && idx_v->type == json::Value::kNum) {
+            idx = (int)idx_v->as_num();
+        }
+        if (idx < 0 || idx >= n_slots) {
+            idx = stage2e::find_wb_write_slot(buf.d_wb_slots, n_slots);
+        }
+        if (idx < 0) {
+            return "(工作台已满且全部写保护, 无法写入)";
+        }
+        const int written = stage2e::launch_wb_text_write(
+            buf.d_wb_slots, idx, text.c_str(), (int)text.size(), tag, protect, step_);
+        if (written < 0) {
+            return "(工作台写入失败)";
+        }
+        return "已写入工作台槽[" + std::to_string(written) + "] 类型=" +
+               std::string(slot_tag_name(tag)) + " 文本: " +
+               (text.empty() ? "(空)" : text);
+    }
+
+    // ---- search_workbench: 子串搜索 ----
+    if (name == "search_workbench") {
+        std::string q;
+        int maxr = 5;
+        if (args_v) {
+            const json::Value* qv = args_v->find("query");
+            if (qv && qv->type == json::Value::kStr) q = qv->as_str();
+            const json::Value* mv = args_v->find("max_results");
+            if (mv && mv->type == json::Value::kNum) maxr = (int)mv->as_num();
+        }
+        auto hits = stage2e::search_wb_text(buf.d_wb_slots, n_slots, q, maxr);
+        std::string out = q.empty() ? "工作台内容:" : "搜索结果 (query='" + q + "'):";
+        int shown = 0;
+        for (const auto& s : hits) {
+            if (s.tag == (uint8_t)SlotTag::UNUSED) continue;
+            ++shown;
+            char cb[16];
+            std::snprintf(cb, sizeof(cb), "%.2f", s.confidence);
+            std::string text(s.text, s.text + WB_TEXT_CAPACITY);
+            const size_t z = text.find('\0');
+            if (z != std::string::npos) text.resize(z);
+            out += "\n- [" + std::string(slot_tag_name(s.tag)) + "] 置信" +
+                   std::string(cb) + ": ";
+            out += text.empty() ? "(无文本)" : text;
+        }
+        if (!shown) out += "\n(无匹配)";
+        return out;
+    }
+
+    return "(未知工具: " + name + ")";
 }
 
 // -----------------------------------------------------------------------------

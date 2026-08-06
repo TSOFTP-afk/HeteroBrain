@@ -112,6 +112,17 @@ struct PersistentBuffers {
     int*               d_wm_write_cursor = nullptr;   // [1] WM LRU 写入游标
     float*             d_prefrontal_input = nullptr;   // [N_PREFRONTAL_NEURONS] 前额叶输入电流缓冲
 
+    // ---------------------------------------------------------------------
+    // Phase 3b: 认知工作台 (Cognitive Workbench, 2026-08-07) — 认知工作空间 Layer 2
+    // ---------------------------------------------------------------------
+    // 256 槽可读写外部工作区 (替代 WM 成为认知工作空间), 读写头机制
+    // 显存: 256×248B + 1×4B + 256×4B + 50×4B + 5000×4B ≈ 84.6 KB
+    WorkbenchSlot*    d_wb_slots = nullptr;          // [WB_CAPACITY] 工作台槽位
+    int*               d_wb_write_cursor = nullptr;   // [1] 写头 LRU 游标
+    float*             d_wb_read_attn = nullptr;      // [WB_CAPACITY] 读头注意力权重
+    float*             d_wb_read_signal = nullptr;    // [WB_SIGNATURE_DIM] 读头重建签名 (LLM 导出)
+    float*             d_wb_prefrontal_input = nullptr; // [N_PREFRONTAL_NEURONS] 工作台注入缓冲
+
     // DA 价值函数相关 (亚柱级 200 维, CPU 端为主, GPU 镜像)
     float*             d_subcolumn_fr;           // 200 × 4B (当前亚柱发放直方图)
     float*             d_baseline_fr;            // 200 × 4B (EMA 基线)

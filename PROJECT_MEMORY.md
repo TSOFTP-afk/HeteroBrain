@@ -28,7 +28,7 @@
    - Layer 1 情感核心：6 维调质向量 (DA/5HT/NE/ACh/GABA/催产素) + LLM 神经调制
      - 注：当前调质信号全来自 SNN 内部状态 (spike/ TD error/ 解码误差)，情绪无语义锚点
      - Phase 3b 起增加事件驱动注入（外部事件→基因硬编码映射→调质，见方向文档 §3.4）
-   - Layer 2 认知工作空间：256 槽 BlackboardSlot + 读写头（替代原 50 槽 WM）
+   - Layer 2 认知工作空间：256 槽 WorkbenchSlot + 读写头（替代原 50 槽 WM）
      - 事件驱动调质注入与 3b 一并实现，避免重复改动 launch_modulatory 接口（§3.4）
    - Layer 3 工具编排：6 工具 + 状态驱动调用信号 + DA reward RL 训练（复用 PSW 突触）
 3. **转换层**：PCA 签名（50 维）↔ LLM embedding（bge-small-zh 512 维）双向桥接 + AffectiveState 调制信号注入（含内部认知信号 + 外部事件信号，§3.4 落地后）
@@ -62,7 +62,7 @@
   - 方向推演记录（已归档）：[docs/archive/snn-emotion-and-workspace-direction.md](file:///f:/thetrueai/docs/archive/snn-emotion-and-workspace-direction.md)
   - 3a-A 6 维调质基础 ✅ / 3a-B 稳态补偿 ✅ / 3a-C1 事件驱动注入 ✅ / 3a-C2 事件叠加修复 ✅
   - 3a-D1 具身发育训练 ✅ / 3a-D2 启蒙期 ⬜ / 3a-D3 课程训练 ⬜（N3F 20K 对照完成，详见 [N3F 设计总览 §7 深层缺陷](file:///f:/thetrueai/docs/N3F-设计总览与实现说明.md#7-深层缺陷分析2026-08-01-代码审查发现)）/ 3a-D4 成年交付 ⬜ / 3a-D5 个性化 ⬜
-  - 3b-3g 待启动（认知黑板 / 黑板-LLM 桥接 / 工具编排 / 工具 RL / 海马溢出 / 端到端验证）
+  - 3b-3g 待启动（认知工作台 / 工作台-LLM 桥接 / 工具编排 / 工具 RL / 海马溢出 / 端到端验证）
 - [ ] **Phase 4** 评测与优化
 - [ ] **Phase 5** 持续学习闭环
 - [ ] **Phase 6** 桌面应用（GUI + EXE 打包）

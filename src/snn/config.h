@@ -492,6 +492,29 @@ enum class InhibitorySubtype : uint8_t {
 #define VTA_RESET                0.0f
 #define VTA_INJECT_GAIN          0.5f    // RPE 强度→电流增益 (单步注入即达阈值)
 #define VTA_STDP_GAIN            0.6f    // STDP 第三因子叠加项增益 (r_vta·da_receptor)
+
+// -----------------------------------------------------------------------------
+// Phase 3b: 认知工作台 (Cognitive Workbench) (2026-08-07)
+// -----------------------------------------------------------------------------
+// 生物学: 前额叶工作记忆外的"外部草稿纸" (Clark & Chalmers 扩展心智) —
+//   SNN 受控的可读写工作区, 替代原 50 槽 WM 成为"认知工作空间" Layer 2。
+// 与现有 WM 的区别:
+//   - 容量 256 (可配置) vs 50
+//   - 逐 slot 读写擦 (读写头) vs 整体 LRU 刷新
+//   - 带类型标签 (FACT/CONCEPT/RELATION/GOAL/HYPOTHESIS/SCRATCH/ANCHOR)
+//   - 写入打情感印记 (6 维调质快照) + 时间戳 + 写保护
+// 详见 docs/archive/snn-emotion-and-workspace-direction.md §6
+#define WB_CAPACITY          256       // 工作台槽位数
+#define WB_SIGNATURE_DIM     PCA_N_COMPONENTS   // 50 维 PCA 签名 (复用)
+#define WB_EMBEDDING_DIM     512       // LLM embedding 维度 (bge-small-zh, 3c 桥接用, 3b 预留)
+#define WB_EMOTION_DIM       6         // 情感印记维度 (6 维调质快照 [DA,ACh,NE,5HT,GABA,Oxy])
+#define WB_DECAY             0.995f    // 每步激活衰减因子 (与新 WM 一致)
+#define WB_INJECT_THRESHOLD  0.3f      // 注入阈值 (activation > 0.3 时反投影注入前额叶)
+#define WB_INJECT_GAIN       0.5f      // 注入前额叶电流增益
+#define WB_NOVELTY_THRESHOLD 0.7f      // 新颖判定阈值 (cosine < 0.7 视为新颖 → LRU 写入)
+#define WB_WRITE_INTERVAL    100       // 签名写入间隔 (每 100 步计算 PCA 签名并匹配)
+#define WB_READ_TOP_SLOTS    5         // 引擎导出给 LLM 的最大槽位数 (激活降序)
+#define WB_TEXT_CAPACITY     256       // 槽位文本容量 (UTF-8 字节, 双模态: LLM 可读写的文本)
 #define VTA_POS_GAIN             0.5f    // da_delta>0→正组注入强度增益
 #define VTA_NEG_GAIN             0.5f    // prediction_error_norm→负组注入强度增益
 

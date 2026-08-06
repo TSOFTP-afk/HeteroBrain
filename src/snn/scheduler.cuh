@@ -177,6 +177,7 @@ public:
     int max_delay_slot_depth() const { return max_delay_slot_depth_; }
     int p3_inhibitory_updates() const { return p3_inhibitory_updates_; }
     int p3_wm_updates() const { return p3_wm_updates_; }
+    int wb_updates() const { return wb_updates_; }   // Phase 3b: 认知工作台更新计数
     float p3_last_activity_drive() const { return p3_last_activity_drive_; }
     int p3_kwta_updates() const { return p3_kwta_updates_; }
     int p3_kwta_active_columns() const { return p3_kwta_active_columns_; }
@@ -392,6 +393,7 @@ private:
     int max_delay_slot_depth_;
     int p3_inhibitory_updates_;
     int p3_wm_updates_;
+    int wb_updates_ = 0;   // Phase 3b: 认知工作台更新计数
     float p3_last_activity_drive_;
     int p3_kwta_updates_;
     int p3_kwta_active_columns_;
@@ -506,6 +508,11 @@ private:
     float* d_replay_recon_ = nullptr;        // [N_ASSOCIATION_NEURONS_2E] PCA 反投影重建临时缓冲
     int replay_cycle_count_ = 0;             // 重放周期计数 (供 FINAL_METRICS 输出)
 
+    // ==================== Phase 3b: 工作台情感印记 GPU 缓存 ====================
+    // 2026-08-07 修复: 工作台写入内核需在 GPU 读情感浓度, 但 curriculum_mod_sim_.conc()
+    //   返回 host 指针. 新增 6 维 GPU 缓存, launch_wb_write 前由 scheduler 拷贝.
+    float* d_wb_emotion_ = nullptr;          // [WB_EMOTION_DIM] 当前调质浓度 GPU 镜像
+
     // ==================== Task 8: 结构可塑性临时缓冲 ====================
     int* d_new_synapse_pairs_ = nullptr;     // [COACT_MAX_NEW_SYNAPSES × 2] 新突触对
     int* d_new_synapse_count_ = nullptr;     // [1] 新突触计数
@@ -586,6 +593,7 @@ private:
     void launch_modulatory(int step);
     void launch_scaling(int step);
     void launch_wm_update(int step);
+    void launch_wb_update(int step);   // Phase 3b: 认知工作台更新 (写入+维持+读头注入)
 
     void launch_structural_plasticity(int step);
     void launch_developmental(int step);

@@ -17,6 +17,7 @@
 #define VITA_LLM_LLAMA_BACKEND_H
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -85,6 +86,22 @@ public:
 
     // 清空对话历史 (保留情感 prompt)
     void clear_history();
+
+    // ---- 工具调用循环 (2026-08-07, 声明式协议) ----
+    // llama.cpp 此版本无 jinja/MiniCPM 模板, 原生 function calling 不可用,
+    // 故采用"声明式 JSON 协议": 在 system prompt 中描述工具, 模型在回复中输出
+    //   <tool_call>{"name":"...","args":{...}}</tool_call>
+    // 引擎经 tool_callback 执行工具并把结果以 tool 角色消息回填, 再让模型基于
+    // 结果生成最终回复, 循环直到无工具调用或达到 max_turns。
+    //   user_text: 当前用户消息; response: 最终回复 (不含工具调用块);
+    //   tool_callback: 接收完整 <tool_call> JSON 字符串, 返回工具结果文本
+    //     (供引擎解析 name/args 并访问工作台; 返回空 = 工具执行失败);
+    //   max_turns: 工具调用轮数上限。
+    // 返回 0 成功 (含达到 max_turns 但无工具 = 正常); 负值错误码同 chat()。
+    int chat_tools(
+        const std::string& user_text, std::string& response,
+        const std::function<std::string(const std::string&)>& tool_callback,
+        int max_turns = 4);
 
     // 预热: 在进入交互循环前强制完成一次 forward 解码, 触发 ggml-cuda 惰性初始化
     // (cuBLAS 句柄/工作区/图分配)。SNN 与 llama 共驻同一 GPU 时, 若首个 llama

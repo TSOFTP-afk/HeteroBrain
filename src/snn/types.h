@@ -162,6 +162,53 @@ static_assert(sizeof(WMSlot) == 216,
               "WMSlot must be 216 bytes (v3 强化 E)");
 
 // -----------------------------------------------------------------------------
+// 认知工作台类型标签 (Phase 3b, 2026-08-07)
+//   工作台槽位携带语义类型标签, 供前额叶/LLM 区分槽位内容性质。
+//   对应设计文档: 认知工作台 §6 (FACT/CONCEPT/RELATION/GOAL/HYPOTHESIS/SCRATCH/ANCHOR)
+// -----------------------------------------------------------------------------
+enum class SlotTag : uint8_t {
+    UNUSED     = 0,   // 空槽 (从未写入)
+    FACT       = 1,   // 事实 (已验证的确定性知识)
+    CONCEPT    = 2,   // 概念 (抽象类目)
+    RELATION   = 3,   // 关系 (两个概念间的连接)
+    GOAL       = 4,   // 目标 (当前追求的状态)
+    HYPOTHESIS = 5,   // 假设 (待验证的猜测, 可被推翻)
+    SCRATCH    = 6,   // 草稿 (多步推理中间结果)
+    ANCHOR     = 7,   // 锚点 (长期稳定引用, 防御性保留)
+    COUNT      = 8
+};
+
+// -----------------------------------------------------------------------------
+// 认知工作台槽位 (248B, Phase 3b: 256 槽)
+// -----------------------------------------------------------------------------
+// 与 WMSlot (216B) 的关键区别:
+//   - 带类型标签 (tag) + 情感印记 (emotion[6]) + 时间戳 (timestamp) + 写保护 (protection)
+//   - 逐槽读写擦 (读写头机制) vs WM 整体 LRU 刷新
+// 布局 (对齐到 8B):
+//   signature[50]   200B  50 维 PCA 签名 (复用 WB_SIGNATURE_DIM)
+//   emotion[6]       24B  写入时 6 维调质快照 [DA,ACh,NE,5HT,GABA,Oxy]
+//   confidence        4B  置信度 (0..1)
+//   activation        4B  当前激活 (每步乘 WB_DECAY 衰减)
+//   timestamp         4B  最近写入/刷新步
+//   tag               1B  类型标签 (SlotTag)
+//   protection        1B  写保护标志 (1=受保护, LRU 不可覆盖)
+//   text[256]       256B  UTF-8 文本 (双模态: LLM 经工具读写; SNN 写槽时留空)
+//   _pad[?]           ?B  凑齐 512B (字段基 238B + text 256B + pad 18B = 512B)
+struct WorkbenchSlot {
+    float   signature[WB_SIGNATURE_DIM];   // 50 维 PCA 签名
+    float   emotion[WB_EMOTION_DIM];       // 6 维情感印记
+    float   confidence;                    // 置信度
+    float   activation;                    // 激活强度
+    int     timestamp;                     // 写入步
+    uint8_t tag;                           // 类型标签
+    uint8_t protection;                    // 写保护
+    char    text[WB_TEXT_CAPACITY];        // UTF-8 文本 (双模态, LLM 可读写)
+    uint8_t _pad[18];                      // 对齐填充 (238 + 256 + 18 = 512B)
+};
+static_assert(sizeof(WorkbenchSlot) == 512,
+              "WorkbenchSlot must be 512 bytes (Phase 3b 双模态)");
+
+// -----------------------------------------------------------------------------
 // 发育阶段 (v2 修复 5)
 // -----------------------------------------------------------------------------
 enum class DevPhase : uint8_t {
