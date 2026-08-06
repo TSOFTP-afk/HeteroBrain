@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 贡献指南 / Contributing Guide
+    url: https://github.com/TSOFTP-afk/VITA/blob/main/CONTRIBUTING.md
+    about: 提 Issue / PR 前请先阅读贡献指南。
+  - name: 行为准则 / Code of Conduct
+    url: https://github.com/TSOFTP-afk/VITA/blob/main/CODE_OF_CONDUCT.md
+    about: 参与社区须遵守行为准则。
+  - name: 快速上手 / Quick Start
+    url: https://github.com/TSOFTP-afk/VITA/blob/main/docs/QUICKSTART.md
+    about: 环境与构建问题请先查快速上手。

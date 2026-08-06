@@ -228,6 +228,15 @@ Affect must not be computed externally by a "concentration simulator" and stuffe
 
 ---
 
+## 社区 / Community
+
+- **API 文档**：[docs/API.md](docs/API.md) — `/v1/models`、`/v1/chat/completions`、`/v1/world` 契约
+- **快速上手**：[docs/QUICKSTART.md](docs/QUICKSTART.md) — 从构建到 serve 的完整步骤与踩坑
+- **贡献指南**：[CONTRIBUTING.md](CONTRIBUTING.md) — Issue/PR 流程、代码风格、提交规范
+- **行为准则**：[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) — 社区行为规范
+
+---
+
 ## 许可 / License
 
 Apache License 2.0 — 见 [LICENSE](./LICENSE)。`legacy/` 旧代码继承自上一代项目（原 CC BY 4.0），新代码采用 Apache 2.0。
